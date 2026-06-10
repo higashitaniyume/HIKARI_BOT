@@ -420,33 +420,51 @@ async def _download_and_send(
 
 
 # ============================================================================
+# 事件类型 Rule
+# ============================================================================
+
+
+def _is_group_event(event: Event) -> bool:
+    return isinstance(event, GroupMessageEvent)
+
+
+def _is_private_event(event: Event) -> bool:
+    return isinstance(event, PrivateMessageEvent)
+
+
+IS_GROUP = Rule(_is_group_event)
+IS_PRIVATE = Rule(_is_private_event)
+
+# ============================================================================
 # 消息处理
 # ============================================================================
 
-# 群聊：@机器人 触发
-group_parser = on_message(rule=to_me() & WHITELIST & HAS_MEDIA_URL, priority=85, block=True)
+# 群聊：@机器人 触发（仅 GroupMessageEvent）
+group_parser = on_message(
+    rule=IS_GROUP & to_me() & WHITELIST & HAS_MEDIA_URL,
+    priority=85,
+    block=True,
+)
 
 
 @group_parser.handle()
 async def handle_group_parse(bot: Bot, event: Event):
     """群聊中 @机器人 发送媒体链接时触发解析。"""
-    if not isinstance(event, GroupMessageEvent):
-        return
-
     pure_text = event.get_plaintext().strip()
     await _parse_and_reply(bot, event, pure_text)
 
 
-# 私聊：任意消息触发
-private_parser = on_message(rule=WHITELIST & HAS_MEDIA_URL, priority=93, block=True)
+# 私聊：任意消息触发（仅 PrivateMessageEvent）
+private_parser = on_message(
+    rule=IS_PRIVATE & WHITELIST & HAS_MEDIA_URL,
+    priority=93,
+    block=True,
+)
 
 
 @private_parser.handle()
 async def handle_private_parse(bot: Bot, event: Event):
     """私聊中发送媒体链接时触发解析。"""
-    if not isinstance(event, PrivateMessageEvent):
-        return
-
     pure_text = event.get_plaintext().strip()
     await _parse_and_reply(bot, event, pure_text)
 
