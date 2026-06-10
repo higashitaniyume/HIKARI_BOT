@@ -31,7 +31,7 @@ from nonebot.adapters.onebot.v11 import (
     MessageSegment,
     PrivateMessageEvent,
 )
-from nonebot.rule import Rule
+from nonebot.rule import Rule, to_me
 from openai import AsyncOpenAI
 
 from src.core.config import (
@@ -1037,8 +1037,18 @@ async def _whitelist_check(event: Event) -> bool:
 
 WHITELIST = Rule(_whitelist_check)
 
-# 统一消息入口（优先级 50，block=True，拦截所有白名单消息）
-agent_handler = on_message(rule=WHITELIST, priority=3, block=True)
+# 群聊必须 @机器人 才能触发，私聊无需 @
+async def _need_me_rule(event: Event) -> bool:
+    if isinstance(event, PrivateMessageEvent):
+        return True
+    if isinstance(event, GroupMessageEvent):
+        return await to_me()(event)
+    return False
+
+NEED_ME = Rule(_need_me_rule)
+
+# 统一消息入口
+agent_handler = on_message(rule=WHITELIST & NEED_ME, priority=3, block=True)
 
 
 @agent_handler.handle()
