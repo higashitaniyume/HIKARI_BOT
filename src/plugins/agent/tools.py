@@ -339,8 +339,35 @@ async def _tool_send_message(
 
 async def _tool_send_to(
     bot: Bot, target: str, text: str, at_user: int | None = None,
+    *,
+    event: Event | None = None,
 ) -> str:
-    """主动向指定目标发送消息。"""
+    """主动向指定目标发送消息。
+
+    安全限制：
+    - 群聊中只能发到当前群
+    - 私聊中只能发给自己
+    - 超级管理员可发任意目标
+    """
+    from src.core.config import SUPER_ADMIN as _SA
+
+    # ── 安全校验：限制目标范围 ─────────────────────
+    if event is not None and event.user_id != _SA:
+        if isinstance(event, GroupMessageEvent):
+            allowed_target = f"group:{event.group_id}"
+            if target != allowed_target:
+                return (
+                    f"❌ 安全限制：在当前群聊中只能发送到本群 ({allowed_target})。"
+                    f"如需发送到其他目标，请联系超级管理员。"
+                )
+        elif isinstance(event, PrivateMessageEvent):
+            allowed_target = str(event.user_id)
+            if target != allowed_target:
+                return (
+                    f"❌ 安全限制：在私聊中只能发送给自己。"
+                    f"如需发送到其他目标，请联系超级管理员。"
+                )
+
     is_group = target.startswith("group:")
     try:
         if is_group:
@@ -736,11 +763,79 @@ async def _tool_show_help() -> str:
     return HELP_TEXT
 
 
-async def _tool_send_media_or_file(bot: Bot, path_or_url: str, target: str) -> str:
-    """发送媒体或文件。"""
+# ============================================================================
+# 本地文件安全访问控制
+# ============================================================================
+
+# AI 只能读取这些目录下的文件
+_ALLOWED_LOCAL_DIRS: list[Path] = []
+
+
+def _get_allowed_dirs() -> list[Path]:
+    """获取允许 AI 访问的本地目录列表（惰性初始化，只允许项目内的特定目录）。"""
+    global _ALLOWED_LOCAL_DIRS
+    if not _ALLOWED_LOCAL_DIRS:
+        root = Path(__file__).resolve().parent.parent.parent.parent  # 项目根
+        candidates = [
+            root / "downloads",
+            root / "data" / "media",
+            root / "data" / "files",
+        ]
+        _ALLOWED_LOCAL_DIRS = [d for d in candidates if d.exists()]
+        if not _ALLOWED_LOCAL_DIRS:
+            (root / "downloads").mkdir(parents=True, exist_ok=True)
+            _ALLOWED_LOCAL_DIRS = [root / "downloads"]
+        logger.info(f"AI 文件访问白名单目录: {_ALLOWED_LOCAL_DIRS}")
+    return _ALLOWED_LOCAL_DIRS
+
+
+def _resolve_safe_path(user_path: str) -> Path | None:
+    """安全解析用户提供的文件路径，拒绝路径遍历攻击。
+
+    - 相对路径：相对于项目根目录解析
+    - 绝对路径：直接解析
+    - 拒绝含 .. 的路径
+    - 拒绝不在允许目录内的路径
+
+    Returns:
+        安全的 Path 对象，不安全时返回 None
+    """
+    if not user_path or not user_path.strip():
+        return None
+
+    try:
+        raw = Path(user_path)
+
+        # 拒绝明显的路径遍历（即使后面会 resolve 也要提前拦截）
+        if ".." in user_path.replace("\\", "/").split("/"):
+            return None
+
+        root = Path(__file__).resolve().parent.parent.parent.parent
+        if raw.is_absolute():
+            resolved = raw.resolve()
+        else:
+            resolved = (root / raw).resolve()
+
+        # 必须在允许的目录内
+        for allowed in _get_allowed_dirs():
+            try:
+                resolved.relative_to(allowed)
+                return resolved
+            except ValueError:
+                continue
+        return None
+    except (OSError, ValueError):
+        return None
+
+
+async def _tool_send_media_or_file(
+    bot: Bot, path_or_url: str, target: str,
+) -> str:
+    """发送媒体或文件（仅允许安全路径和 http(s) URL）。"""
     from urllib.parse import urlparse
     from src.plugins.media_sender import get_media_sender
 
+    # ── URL 分支：只允许 http/https ──────────────────
     if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
         f_sender = get_file_sender()
         url_name = Path(urlparse(path_or_url).path).name or "file"
@@ -751,23 +846,31 @@ async def _tool_send_media_or_file(bot: Bot, path_or_url: str, target: str) -> s
             return f"✅ 文件已发送: {url_name} → {target}"
         return f"❌ 文件发送失败: {url_name}"
 
-    path = Path(path_or_url)
-    if not path.exists():
+    # ── 本地文件分支：安全校验 ─────────────────────
+    resolved = _resolve_safe_path(path_or_url)
+    if resolved is None:
+        logger.warning(f"拒绝不安全路径: {path_or_url}")
+        return (
+            "❌ 安全限制：不允许访问该路径。"
+            "请将文件放到 downloads/ 目录下再试。"
+        )
+
+    if not resolved.exists():
         return f"❌ 文件不存在: {path_or_url}"
 
     sender = get_media_sender()
     try:
         await sender.send_bytes(bot, target=target,
-                                data=path.read_bytes(),
-                                filename=path.name)
-        return f"✅ 已发送: {path.name} → {target}"
+                                data=resolved.read_bytes(),
+                                filename=resolved.name)
+        return f"✅ 已发送: {resolved.name} → {target}"
     except Exception as e:
         f_sender = get_file_sender()
         ok = await f_sender.send_file(bot, target=target,
-                                      file_path_or_url=str(path),
-                                      filename=path.name)
+                                      file_path_or_url=str(resolved),
+                                      filename=resolved.name)
         if ok:
-            return f"✅ 文件已发送: {path.name} → {target}"
+            return f"✅ 文件已发送: {resolved.name} → {target}"
         return f"❌ 发送失败: {e}"
 
 
@@ -807,7 +910,7 @@ async def execute_tool(
     elif tool_name == "send_to":
         return await _tool_send_to(
             bot, arguments.get("target", ""), arguments.get("text", ""),
-            at_user=arguments.get("at_user"))
+            at_user=arguments.get("at_user"), event=event)
     elif tool_name == "get_group_info":
         if group_id is None:
             return "❌ 此功能仅在群聊中可用"

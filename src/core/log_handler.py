@@ -68,12 +68,13 @@ class QQLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         """接收日志记录（同步，任意线程调用）。"""
-        if self._sending:
-            return
         try:
             msg = self.format(record)
             now = time.monotonic()
             with self._lock:
+                # 防递归：如果在发送中，丢弃
+                if self._sending:
+                    return
                 # 去重
                 if msg == self._last_msg and now - self._last_msg_time < self._DEDUP_WINDOW:
                     return

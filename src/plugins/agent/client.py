@@ -59,14 +59,18 @@ _client: Optional[AsyncOpenAI] = None
 _api_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_API)
 
 
-def get_client() -> AsyncOpenAI:
-    """获取全局唯一的 AsyncOpenAI 客户端。"""
+def get_client() -> AsyncOpenAI | None:
+    """获取全局唯一的 AsyncOpenAI 客户端。
+
+    若 API key 未配置则返回 None，调用方应自行处理。
+    """
     global _client
     if _client is None:
         if not DEEPSEEK_API_KEY:
             logger.warning("DEEPSEEK_API_KEY 未设置！Agent 将无法工作。")
+            return None
         _client = AsyncOpenAI(
-            api_key=DEEPSEEK_API_KEY or "sk-placeholder",
+            api_key=DEEPSEEK_API_KEY,
             base_url=DEEPSEEK_BASE_URL,
             timeout=60.0,
         )

@@ -15,7 +15,7 @@ import os
 # ── 确定配置文件路径 ───────────────────────────────────────────────
 if "HIKARI_CONFIG_PATH" not in os.environ:
     env = os.getenv("ENVIRONMENT", "")
-    if env == "prod":
+    if env.lower() == "prod":
         os.environ["HIKARI_CONFIG_PATH"] = "config.prod.json"
 
 # ── 加载 HIKARI 配置（读取 JSON） ────────────────────────────────────

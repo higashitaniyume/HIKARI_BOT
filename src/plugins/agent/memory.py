@@ -51,6 +51,36 @@ class MemoryManager:
         self._base = Path(base_dir)
         self._locks: dict[str, asyncio.Lock] = {}
         self._cache: dict[str, tuple[float, list[dict]]] = {}
+        self._last_cleanup = time.monotonic()
+        self._cleanup_interval = 300.0  # 每 5 分钟清理一次
+
+    def _maybe_cleanup(self) -> None:
+        """定期清理过期缓存和空闲锁。"""
+        now = time.monotonic()
+        if now - self._last_cleanup < self._cleanup_interval:
+            return
+        self._last_cleanup = now
+
+        # 清理过期缓存
+        expired_keys = [
+            k for k, (ts, _) in self._cache.items()
+            if now - ts >= _MEMORY_CACHE_TTL
+        ]
+        for k in expired_keys:
+            del self._cache[k]
+
+        # 清理空闲锁（未被持有且对应缓存已过期）
+        idle_locks = [
+            k for k, lock in self._locks.items()
+            if not lock.locked() and k not in self._cache
+        ]
+        for k in idle_locks:
+            del self._locks[k]
+
+        if expired_keys or idle_locks:
+            logger.debug(
+                f"缓存清理: {len(expired_keys)} 缓存 + {len(idle_locks)} 锁"
+            )
 
     def _cache_key(self, user_id: int, group_id: Optional[int]) -> str:
         return f"{group_id or 'private'}:{user_id}"
@@ -91,6 +121,10 @@ class MemoryManager:
         if len(chat_only) < 2:
             return ""
 
+        client = get_client()
+        if client is None:
+            return ""
+
         # 构建对话文本
         lines: list[str] = []
         for m in chat_only:
@@ -105,7 +139,6 @@ class MemoryManager:
         )
 
         try:
-            client = get_client()
             resp = await client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[
@@ -227,6 +260,7 @@ class MemoryManager:
     async def get_memory(
         self, user_id: int, group_id: Optional[int] = None
     ) -> list[dict]:
+        self._maybe_cleanup()
         cache_key = self._cache_key(user_id, group_id)
         lock = self._get_lock(user_id, group_id)
         async with lock:
@@ -236,6 +270,7 @@ class MemoryManager:
         self, user_id: int, user_msg: str, assistant_msg: str,
         group_id: Optional[int] = None,
     ) -> None:
+        self._maybe_cleanup()
         cache_key = self._cache_key(user_id, group_id)
         lock = self._get_lock(user_id, group_id)
         async with lock:
@@ -326,6 +361,10 @@ class MemoryManager:
         if len(content) < 500:
             return content
 
+        client = get_client()
+        if client is None:
+            return content
+
         prompt = (
             "请将以下用户的长期记忆内容压缩整理，保留所有关键事实：\n"
             "- 用户的身份、偏好、习惯\n"
@@ -336,7 +375,6 @@ class MemoryManager:
         )
 
         try:
-            client = get_client()
             resp = await client.chat.completions.create(
                 model=DEEPSEEK_MODEL,
                 messages=[

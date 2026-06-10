@@ -337,6 +337,52 @@ def get_media_sender() -> MediaSender:
 # 命令：/sendimg  /sendvideo  /sendvoice
 # ============================================================================
 
+# 文件路径安全校验白名单（只允许这些目录及其子目录）
+_ALLOWED_SEND_DIRS: list[Path] = []
+
+
+def _get_allowed_send_dirs() -> list[Path]:
+    """惰性初始化允许的目录列表。"""
+    global _ALLOWED_SEND_DIRS
+    if not _ALLOWED_SEND_DIRS:
+        root = Path(__file__).resolve().parent.parent.parent.parent
+        _ALLOWED_SEND_DIRS = [
+            root,
+            root / "downloads",
+            root / "data",
+        ]
+    return _ALLOWED_SEND_DIRS
+
+
+def _validate_file_path(file_str: str) -> tuple[bool, Path | None, str]:
+    """验证文件路径安全性，拒绝路径遍历。
+
+    Returns:
+        (是否安全, 解析后路径, 错误消息)
+    """
+    if not file_str.strip():
+        return False, None, "文件路径为空"
+
+    # 拒绝明显的路径遍历
+    if ".." in file_str.replace("\\", "/").split("/"):
+        return False, None, "不允许使用 '..' 访问上级目录"
+
+    try:
+        path = Path(file_str).resolve()
+    except (OSError, ValueError) as e:
+        return False, None, f"路径解析失败: {e}"
+
+    # 检查是否在允许的目录内
+    for allowed in _get_allowed_send_dirs():
+        try:
+            path.relative_to(allowed)
+            return True, path, ""
+        except ValueError:
+            continue
+
+    return False, path, f"安全限制：不允许访问该路径。请将文件放到项目目录下。"
+
+
 async def _handle_media(
     bot: Bot,
     args: Message,
@@ -366,12 +412,14 @@ async def _handle_media(
     file_str = parts[0].strip().strip('"').strip("'")
     target_str = parts[1].strip()
 
-    path = Path(file_str)
-    if not path.exists():
-        logger.warning(f"{label}文件不存在: {path}")
-        # 注意：on_command 的 finish 需要从当前事件上下文获取
-        # 这里只记录日志，实际 finish 由外层处理
-        return  # 避免异常传递
+    safe, path, err = _validate_file_path(file_str)
+    if not safe:
+        logger.warning(f"拒绝不安全路径: {file_str} — {err}")
+        return
+
+    if path is None or not path.exists():
+        logger.warning(f"{label}文件不存在: {file_str}")
+        return
 
     try:
         await send_func(bot, target=target_str, file_path=path)
@@ -397,9 +445,12 @@ async def handle_sendimg(bot: Bot, args: Message = CommandArg()):
 
     file_str = parts[0].strip().strip('"').strip("'")
     target_str = parts[1].strip()
-    path = Path(file_str)
 
-    if not path.exists():
+    safe, path, err = _validate_file_path(file_str)
+    if not safe:
+        await send_img_cmd.finish(f"❌ {err}")
+
+    if path is None or not path.exists():
         await send_img_cmd.finish(f"文件不存在: {file_str}")
 
     try:
@@ -431,9 +482,12 @@ async def handle_sendvideo(bot: Bot, args: Message = CommandArg()):
 
     file_str = parts[0].strip().strip('"').strip("'")
     target_str = parts[1].strip()
-    path = Path(file_str)
 
-    if not path.exists():
+    safe, path, err = _validate_file_path(file_str)
+    if not safe:
+        await send_video_cmd.finish(f"❌ {err}")
+
+    if path is None or not path.exists():
         await send_video_cmd.finish(f"文件不存在: {file_str}")
 
     try:
@@ -465,9 +519,12 @@ async def handle_sendvoice(bot: Bot, args: Message = CommandArg()):
 
     file_str = parts[0].strip().strip('"').strip("'")
     target_str = parts[1].strip()
-    path = Path(file_str)
 
-    if not path.exists():
+    safe, path, err = _validate_file_path(file_str)
+    if not safe:
+        await send_voice_cmd.finish(f"❌ {err}")
+
+    if path is None or not path.exists():
         await send_voice_cmd.finish(f"文件不存在: {file_str}")
 
     try:

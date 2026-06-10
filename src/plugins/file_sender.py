@@ -110,6 +110,28 @@ def get_file_sender() -> FileSender:
 # 命令: /sendfile  <路径或URL>  <目标>
 # ============================================================================
 
+# 安全校验：从 media_sender 复用路径验证逻辑
+def _validate_local_path(file_str: str) -> tuple[bool, Path | None, str]:
+    """验证本地文件路径安全性。对于 URL 则跳过此校验。"""
+    if "://" in file_str:
+        return True, None, ""  # URL 由 file_sender 透传给 OneBot
+    if not file_str.strip():
+        return False, None, "文件路径为空"
+    if ".." in file_str.replace("\\", "/").split("/"):
+        return False, None, "不允许使用 '..' 访问上级目录"
+    try:
+        path = Path(file_str).resolve()
+    except (OSError, ValueError) as e:
+        return False, None, f"路径解析失败: {e}"
+    # 允许项目根目录及其子目录
+    root = Path(__file__).resolve().parent.parent.parent.parent
+    try:
+        path.relative_to(root)
+        return True, path, ""
+    except ValueError:
+        return False, path, "安全限制：不允许访问项目目录外的路径"
+
+
 send_file_cmd = on_command("sendfile", rule=WHITELIST, priority=10)
 
 
@@ -126,6 +148,11 @@ async def handle_sendfile(bot: Bot, args: Message = CommandArg()):
 
     file_str = parts[0].strip().strip('"').strip("'")
     target_str = parts[1].strip()
+
+    # 安全校验（本地路径）
+    safe, _path, err = _validate_local_path(file_str)
+    if not safe:
+        await send_file_cmd.finish(f"❌ {err}")
 
     # 提取文件名
     parsed_name = Path(file_str.split("?")[0]).name or "file"
