@@ -276,6 +276,22 @@ async def handle_agent(bot: Bot, event: Event):
 
     pure_text = event.get_plaintext().strip()
 
+    # ── 回复检测：有人回复了机器人发的消息 ──────────────
+    reply_prefix = ""
+    reply_msg = getattr(event, "reply", None)
+    if reply_msg and getattr(reply_msg, "user_id", None) == event.self_id:
+        # 提取被回复的消息内容
+        replied_text = str(reply_msg.message).strip() if hasattr(reply_msg, "message") else ""
+        if replied_text:
+            reply_prefix = (
+                f"（用户回复了你之前发的消息「{replied_text[:200]}」"
+            )
+            if pure_text:
+                reply_prefix += f"，并说: {pure_text}）"
+            else:
+                reply_prefix += "）"
+            pure_text = reply_prefix
+
     silent_at = False  # 标记：是否只 @ 没说话
 
     # 群聊中只 @机器人 但没说话 → 只看最近 2 条上下文，简要回应
