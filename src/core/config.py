@@ -103,3 +103,42 @@ WHITELIST_FILE: str = _get("whitelist.file", "data/admin/whitelist.json")
 # ============================================================================
 
 COBALT_API: str = _get("cobalt.api", "http://127.0.0.1:9000/")
+
+# ============================================================================
+# 版本信息（version.json）
+# ============================================================================
+
+# 从项目根目录的 version.json 读取版本号和构建号
+_VERSION_PATH = _CONFIG_FILE.parent / "version.json"
+
+
+def get_version() -> str:
+    """返回版本字符串，如 'v0.1.0 (build 42)'。"""
+    try:
+        if _VERSION_PATH.exists():
+            v = json.loads(_VERSION_PATH.read_text(encoding="utf-8"))
+            ver = v.get("version", "0.0.0")
+            build = v.get("build", 0)
+            return f"v{ver} (build {build})"
+    except (json.JSONDecodeError, ValueError, OSError) as e:
+        logger.warning(f"无法读取版本信息: {e}")
+    return "v0.0.0 (unknown)"
+
+
+def bump_build() -> int:
+    """递增 version.json 中的 build 号，返回新 build 号。"""
+    try:
+        if _VERSION_PATH.exists():
+            v = json.loads(_VERSION_PATH.read_text(encoding="utf-8"))
+        else:
+            v = {"version": "0.1.0", "build": 0}
+        v["build"] = v.get("build", 0) + 1
+        _VERSION_PATH.write_text(
+            json.dumps(v, ensure_ascii=False, indent=4) + "\n",
+            encoding="utf-8",
+        )
+        logger.info(f"版本号已更新: v{v['version']} (build {v['build']})")
+        return v["build"]
+    except (OSError, ValueError) as e:
+        logger.error(f"无法更新版本号: {e}")
+        raise

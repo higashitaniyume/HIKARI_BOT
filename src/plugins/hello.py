@@ -3,6 +3,7 @@
 from nonebot import on_type, get_bot, logger
 from nonebot.adapters.onebot.v11 import LifecycleMetaEvent
 
+from src.core.config import get_version
 from src.plugins.media_sender import get_media_sender
 
 # 目标 QQ 号
@@ -32,11 +33,12 @@ async def handle_lifecycle(event: LifecycleMetaEvent):
 
         # ── 文字问候 ──────────────────────────────
         try:
+            version_str = get_version()
             await bot.send_private_msg(
                 user_id=TARGET_QQ,
-                message="Hello World! HIKARI_BOT 已上线 🎉",
+                message=f"Hello World! HIKARI_BOT {version_str} 已上线 🎉",
             )
-            logger.success(f"上线通知已发送至 QQ {TARGET_QQ}")
+            logger.success(f"上线通知已发送至 QQ {TARGET_QQ} ({version_str})")
         except Exception as e:
             logger.error(f"发送上线通知失败: {e}")
 
