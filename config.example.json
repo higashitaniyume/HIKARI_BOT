@@ -1,0 +1,25 @@
+{
+    "//": "HIKARI_BOT 配置模板 —— 复制为 config.json 并填入真实值",
+    "nonebot": {
+        "driver": "~websockets",
+        "onebot_v11_ws_urls": ["ws://127.0.0.1:54258/"],
+        "access_token": "your-access-token",
+        "log_level": "INFO"
+    },
+    "deepseek": {
+        "api_key": "sk-your-deepseek-api-key",
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-chat",
+        "system_prompt": "你是一个可爱的QQ机器人，名叫HIKARI。请用中文回复，语气活泼可爱。"
+    },
+    "ai_memory": {
+        "max_messages": 20,
+        "dir": "data/ai_memory"
+    },
+    "whitelist": {
+        "file": "data/admin/whitelist.json"
+    },
+    "cobalt": {
+        "api": "http://127.0.0.1:9000/"
+    }
+}

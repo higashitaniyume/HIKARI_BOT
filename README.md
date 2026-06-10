@@ -6,13 +6,13 @@
 
 ```
 HIKARI_BOT/
-├── .env                  # 开发环境配置
-├── .env.prod             # 生产环境配置
+├── config.json           # 开发环境配置（JSON）
+├── config.prod.json      # 生产环境配置（JSON）
 ├── bot.py                # Bot 入口
 ├── README.md
 └── src/
     ├── core/
-    │   └── config.py     # 统一配置管理（环境变量）
+    │   └── config.py     # 统一配置管理（读取 JSON）
     └── plugins/
         ├── admin.py              # 管理员鉴权 & 白名单管理
         ├── ai_chat.py            # AI 聊天（DeepSeek）
@@ -25,40 +25,68 @@ HIKARI_BOT/
 
 ## 配置
 
+所有配置集中在项目根目录的 `config.json` 文件中。
+
 - **协议**: OneBot v11 正向 WebSocket（客户端模式）
-- **连接地址**: `ws://192.168.31.2:8082/onebot/v11/ws`
-- **Access Token**: 已配置在 `.env` / `.env.prod` 中
+- **连接地址**: 配置在 `config.json` → `nonebot.onebot_v11_ws_urls`
 
-### 环境变量
+### 配置文件结构
 
-```bash
-# DeepSeek API
-DEEPSEEK_API_KEY=          # API 密钥（必填）
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
-DEEPSEEK_SYSTEM_PROMPT=你是一个可爱的QQ机器人。
-
-# AI 记忆
-MAX_MEMORY_MESSAGES=20     # 最大保留轮数
-AI_MEMORY_DIR=data/ai_memory
-
-# 白名单
-WHITELIST_FILE=data/admin/whitelist.json
-
-# Cobalt 视频解析
-COBALT_API=http://192.168.31.2:9000/
+```json
+{
+    "nonebot": {
+        "driver": "~websockets",
+        "onebot_v11_ws_urls": ["ws://127.0.0.1:54258/"],
+        "access_token": "your-token",
+        "log_level": "INFO"
+    },
+    "deepseek": {
+        "api_key": "sk-xxx",
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-chat",
+        "system_prompt": "你是一个可爱的QQ机器人。"
+    },
+    "ai_memory": {
+        "max_messages": 20,
+        "dir": "data/ai_memory"
+    },
+    "whitelist": {
+        "file": "data/admin/whitelist.json"
+    },
+    "cobalt": {
+        "api": "http://127.0.0.1:9000/"
+    }
+}
 ```
+
+| 配置节 | 字段 | 说明 |
+| ------ | ------ | ------ |
+| `nonebot` | `driver` | NoneBot2 驱动 |
+| | `onebot_v11_ws_urls` | OneBot 正向 WebSocket 地址 |
+| | `access_token` | Access Token |
+| | `log_level` | 日志级别 (DEBUG/INFO/WARNING/ERROR) |
+| `deepseek` | `api_key` | DeepSeek API 密钥（必填） |
+| | `base_url` | API 地址 |
+| | `model` | 模型名称 |
+| | `system_prompt` | 系统提示词 |
+| `ai_memory` | `max_messages` | 最大保留消息条数 |
+| | `dir` | 记忆存储目录 |
+| `whitelist` | `file` | 白名单文件路径 |
+| `cobalt` | `api` | Cobalt 视频解析 API 地址 |
 
 ## 如何使用
 
 ### 运行
 
 ```bash
-# 开发环境
+# 开发环境（使用 config.json）
 python bot.py
 
-# 生产环境（自动加载 .env.prod）
+# 生产环境（使用 config.prod.json）
 ENVIRONMENT=prod python bot.py
+
+# 指定自定义配置文件
+HIKARI_CONFIG_PATH=/path/to/my-config.json python bot.py
 ```
 
 ### 可用命令

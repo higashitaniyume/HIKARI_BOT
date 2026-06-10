@@ -1,145 +1,223 @@
-<#
-    HIKARI_BOT 部署脚本 (PowerShell)
-    使用 Windows 自带 ssh.exe / scp.exe
-    部署到 192.168.31.2 的 /root/HIKARI_BOT/
-#>
+# HIKARI_BOT 部署脚本 (systemd + uv)
+# 用法:
+#   .\deploy.ps1              上传 + uv sync + 重启服务
+#   .\deploy.ps1 -Logs        查看实时日志
+#   .\deploy.ps1 -Status      查看服务状态
 
 param(
-    [string]$Server   = "192.168.31.2",
-    [string]$User     = "root",
-    [string]$RemoteDir = "/root/HIKARI_BOT"
+    [string]$Server    = "192.168.31.2",
+    [string]$User      = "root",
+    [string]$Password  = "123456",
+    [string]$RemoteDir = "/opt/HIKARI_BOT",
+    [switch]$Logs      = $false,
+    [switch]$Status    = $false
 )
 
 $ErrorActionPreference = "Stop"
-$LocalDir = $PSScriptRoot
 
-# 常用 SSH 参数：跳过 known_hosts 检查
-$SshArgs = @("-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null")
-
-# ==================== 颜色 ====================
-function Write-Info  { Write-Host "[INFO]  $args" -ForegroundColor Green }
-function Write-Warn  { Write-Host "[WARN]  $args" -ForegroundColor Yellow }
-function Write-Err   { Write-Host "[ERROR] $args" -ForegroundColor Red }
+# ============================================================================
+# 工具函数
+# ============================================================================
 
 function Write-Step {
-    param([int]$N, [string]$Desc)
+    param([int]$N, [string]$Desc, [int]$Total = 4)
     Write-Host ""
-    Write-Host "=== $N/5 $Desc ===" -ForegroundColor Cyan
+    Write-Host ("─" * 55) -ForegroundColor DarkGray
+    Write-Host " [$N/$Total] $Desc" -ForegroundColor Cyan
+    Write-Host ("─" * 55) -ForegroundColor DarkGray
+}
+function Write-OK  { Write-Host "  ✓ $args" -ForegroundColor Green }
+function Write-Warn { Write-Host "  ⚠ $args" -ForegroundColor Yellow }
+function Write-Err  { Write-Host "  ✗ $args" -ForegroundColor Red; exit 1 }
+
+# ============================================================================
+# 检测 SSH 工具
+# ============================================================================
+
+Write-Host ""
+Write-Host "╔══════════════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║     HIKARI_BOT 部署 (systemd + uv)              ║" -ForegroundColor Cyan
+Write-Host "║     目标: ${User}@${Server}  ${RemoteDir}           ║" -ForegroundColor Cyan
+Write-Host "╚══════════════════════════════════════════════════╝" -ForegroundColor Cyan
+
+$SSH = $null; $SCP = $null; $SSH_TYPE = ""
+
+$plinkPaths = @(
+    "C:\Program Files\PuTTY\plink.exe",
+    "C:\Program Files (x86)\PuTTY\plink.exe"
+)
+foreach ($p in $plinkPaths) {
+    if (Test-Path $p) { $SSH = $p; $SCP = $p.Replace("plink.exe", "pscp.exe"); $SSH_TYPE = "plink"; break }
+}
+if (-not $SSH) {
+    $cmd = Get-Command plink.exe -ErrorAction SilentlyContinue
+    if ($cmd) { $SSH = $cmd.Source; $SCP = (Get-Command pscp.exe).Source; $SSH_TYPE = "plink" }
+}
+if (-not $SSH) {
+    $cmd = Get-Command ssh.exe -ErrorAction SilentlyContinue
+    if ($cmd) { $SSH = $cmd.Source; $SCP = (Get-Command scp.exe).Source; $SSH_TYPE = "ssh" }
+}
+if (-not $SSH) {
+    Write-Err "未找到 ssh.exe 或 plink.exe`n  OpenSSH: 设置 → 可选功能 → 添加 OpenSSH 客户端`n  PuTTY: https://www.chiark.greenend.org.uk/~sgtatham/putty/latest.html"
 }
 
-# ==================== 远程脚本（在服务器上执行） ====================
-# 先把这段脚本上传到服务器，然后一次性执行，减少密码输入次数
-$RemoteSetupScript = @'
-#!/usr/bin/env bash
+Write-Host ""
+if ($SSH_TYPE -eq "plink") { Write-OK "SSH: PuTTY (密码模式)" }
+else { Write-OK "SSH: OpenSSH"; Write-Warn "请确保已配置免密登录: ssh-copy-id ${User}@${Server}" }
+
+$sshBaseArgs = if ($SSH_TYPE -eq "plink") {
+    @("-l", $User, "-pw", $Password, "-P", "22", "-batch")
+} else {
+    @("-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null")
+}
+
+function Invoke-SSH {
+    param([string]$Command)
+    if ($SSH_TYPE -eq "plink") {
+        $tmp = [System.IO.Path]::GetTempFileName()
+        $Command -replace "`r`n", "`n" | Out-File -FilePath $tmp -Encoding ASCII
+        $r = Get-Content $tmp -Raw | & $SSH @sshBaseArgs $Server "bash -s" 2>&1
+        Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+        $r
+    } else {
+        $Command | & $SSH @sshBaseArgs "${User}@${Server}" "bash -s" 2>&1
+    }
+}
+
+function Invoke-RSCP {
+    param([string]$Source, [string]$Dest)
+    if ($SSH_TYPE -eq "plink") {
+        & $SCP @sshBaseArgs -r -q $Source "${Server}:${Dest}" 2>&1
+    } else {
+        & $SCP @sshBaseArgs -r -q $Source "${User}@${Server}:${Dest}" 2>&1
+    }
+}
+
+# ============================================================================
+# 快捷命令
+# ============================================================================
+
+if ($Logs) {
+    Invoke-SSH "journalctl -u hikari-bot -f -n 50"
+    exit 0
+}
+
+if ($Status) {
+    Invoke-SSH "systemctl status hikari-bot --no-pager 2>&1; echo '---'; journalctl -u hikari-bot -n 30 --no-pager 2>&1"
+    exit 0
+}
+
+# ============================================================================
+# 1. 上传
+# ============================================================================
+
+Write-Step 1 "上传项目文件" 4
+
+$LocalRoot = $PSScriptRoot
+
+Write-Host "  创建远程目录..." -ForegroundColor Gray
+Invoke-SSH "mkdir -p $RemoteDir/data/ai_memory $RemoteDir/data/admin $RemoteDir/logs"
+
+$UploadItems = @(
+    @{Src="bot.py";                   Dst="$RemoteDir/bot.py"},
+    @{Src="pyproject.toml";           Dst="$RemoteDir/pyproject.toml"},
+    @{Src="uv.lock";                  Dst="$RemoteDir/uv.lock"},
+    @{Src="config.prod.json";         Dst="$RemoteDir/config.prod.json"},
+    @{Src="deploy/hikari-bot.service"; Dst="$RemoteDir/hikari-bot.service"},
+    @{Src="src";                      Dst="$RemoteDir/"}
+)
+
+Push-Location $LocalRoot
+try {
+    foreach ($item in $UploadItems) {
+        Write-Host "  上传: $($item.Src)" -ForegroundColor Gray
+        Invoke-RSCP -Source $item.Src -Dest $item.Dst
+        if ($LASTEXITCODE -ne 0) { Pop-Location; Write-Err "上传失败: $($item.Src)" }
+    }
+    Write-OK "全部上传完成"
+} finally { Pop-Location }
+
+# ============================================================================
+# 2. 安装依赖
+# ============================================================================
+
+Write-Step 2 "安装依赖 (uv sync)" 4
+
+$depScript = @'
 set -e
+cd REMOTE_DIR_PLACEHOLDER
 
-REMOTE_DIR="/root/HIKARI_BOT"
-
-echo ">>> 检查 Python 环境..."
-if ! command -v python3 &>/dev/null; then
-    echo "安装 Python3..."
-    apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv
+# 确保 uv 已安装
+if ! command -v uv &>/dev/null; then
+    echo "uv 未安装，正在安装..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
 fi
-PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-echo "Python 版本: $PY_VER"
 
-echo ""
-echo ">>> 修复配置（bot 与 NapCat 同机部署，改用 127.0.0.1）..."
-cd $REMOTE_DIR
-sed -i 's|ws://192\.168\.31\.2:[0-9]\+/|ws://127.0.0.1:54258/|g' .env.prod
-cp -f .env.prod .env
-echo ".env 内容:"
-cat .env
+# 安装/更新依赖
+uv sync
+echo "OK"
+'@ -replace "REMOTE_DIR_PLACEHOLDER", $RemoteDir
 
-echo ""
-echo ">>> 安装 Python 依赖..."
-if [ ! -d ".venv" ]; then
-    python3 -m venv .venv
-fi
-source .venv/bin/activate
-pip install -q --upgrade pip
-pip install -q nonebot2 nonebot-adapter-onebot nonebot-plugin-docs nonebot-plugin-sentry
-echo "依赖安装完成"
+$result = Invoke-SSH $depScript
+if ($result -match "OK") { Write-OK "依赖已就绪" }
+else { Write-Host $result -ForegroundColor Gray; Write-Err "依赖安装失败" }
 
-echo ""
-echo ">>> 创建 systemd 服务..."
-cat > /etc/systemd/system/hikari-bot.service << 'SVC_EOF'
-[Unit]
-Description=HIKARI_BOT QQ Bot (NoneBot2 + OneBot v11)
-After=network.target
+# ============================================================================
+# 3. 安装 & 启动服务
+# ============================================================================
 
-[Service]
-Type=simple
-WorkingDirectory=/root/HIKARI_BOT
-Environment=ENVIRONMENT=prod
-ExecStart=/root/HIKARI_BOT/.venv/bin/python /root/HIKARI_BOT/bot.py
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
+Write-Step 3 "安装 & 启动 systemd 服务" 4
 
-[Install]
-WantedBy=multi-user.target
-SVC_EOF
+$svcScript = @'
+set -e
+cd REMOTE_DIR_PLACEHOLDER
 
+# ── 准备配置文件 ─────────────────────────────────
+cp -f config.prod.json config.json
+
+# ── 准备目录 ─────────────────────────────────────
+mkdir -p data/ai_memory data/admin logs
+
+# ── 安装服务文件 ─────────────────────────────────
+cp -f hikari-bot.service /etc/systemd/system/hikari-bot.service
 systemctl daemon-reload
 systemctl enable hikari-bot
+
+# ── 重启 ─────────────────────────────────────────
 systemctl restart hikari-bot
-echo "服务已启动"
+sleep 2
+echo "OK"
+'@ -replace "REMOTE_DIR_PLACEHOLDER", $RemoteDir
 
-echo ""
-echo "==================================="
-echo "  HIKARI_BOT 部署完成！"
-echo "==================================="
-echo ""
-echo "常用命令:"
-echo "  查看日志: journalctl -u hikari-bot -f"
-echo "  查看状态: systemctl status hikari-bot"
-echo "  重启服务: systemctl restart hikari-bot"
-echo "  停止服务: systemctl stop hikari-bot"
-echo ""
-'@
+$result = Invoke-SSH $svcScript
+if ($result -match "OK") { Write-OK "服务已启动" }
+else { Write-Host $result -ForegroundColor Gray; Write-Err "服务启动失败" }
 
-# ==================== 主流程 ====================
+# ============================================================================
+# 4. 状态
+# ============================================================================
+
+Write-Step 4 "运行状态" 4
+
+$svcStatus = Invoke-SSH "systemctl is-active hikari-bot 2>&1 && echo '---' && journalctl -u hikari-bot -n 15 --no-pager 2>&1"
+Write-Host $svcStatus -ForegroundColor Gray
+
+if ($svcStatus -match "active") { Write-OK "服务运行中 ✓" }
+else { Write-Warn "服务可能未启动，查看上方日志" }
+
 Write-Host ""
-Write-Host "==============================================" -ForegroundColor Cyan
-Write-Host "  HIKARI_BOT 部署脚本" -ForegroundColor Cyan
-Write-Host "  目标: ${User}@${Server}:${RemoteDir}" -ForegroundColor Cyan
-Write-Host "==============================================" -ForegroundColor Cyan
+Write-Host "╔══════════════════════════════════════════════════╗" -ForegroundColor Cyan
+Write-Host "║           部署完成 ✓                            ║" -ForegroundColor Cyan
+Write-Host "╚══════════════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
-Write-Warn "部署过程中需要输入服务器密码 (123456)，共会提示 2 次"
-
-# ---------- 1. 清理并上传 ----------
-Write-Step 1 "上传项目文件到服务器"
-# 先把远程设置脚本写到本地临时文件
-$tempSetup = Join-Path $env:TEMP "hikari_setup.sh"
-$RemoteSetupScript | Out-File -FilePath $tempSetup -Encoding ASCII -NoNewline
-
-Write-Host "  清理旧目录..."
-ssh.exe @SshArgs "${User}@${Server}" "rm -rf ${RemoteDir} && mkdir -p ${RemoteDir}/src"
-
-Write-Host "  上传 bot.py, .env.prod, pyproject.toml ..."
-scp.exe @SshArgs -r `
-    "$LocalDir\bot.py",
-    "$LocalDir\.env.prod",
-    "$LocalDir\pyproject.toml",
-    "$LocalDir\src" `
-    "${User}@${Server}:${RemoteDir}/"
-
-Write-Host "  上传远程设置脚本..."
-scp.exe @SshArgs $tempSetup "${User}@${Server}:${RemoteDir}/setup.sh"
-Remove-Item $tempSetup -Force
-
-# ---------- 2. 执行远程设置 ----------
-Write-Step 2 "在服务器上执行环境安装 & 配置"
-ssh.exe @SshArgs "${User}@${Server}" "chmod +x ${RemoteDir}/setup.sh && bash ${RemoteDir}/setup.sh"
-
-# ---------- 3. 查看服务状态 ----------
-Write-Step 3 "查看服务运行状态"
+Write-Host "  日常使用:" -ForegroundColor White
+Write-Host "    .\deploy.ps1              上传 + uv sync + 重启" -ForegroundColor Gray
+Write-Host "    .\deploy.ps1 -Status      查看服务状态 + 最近日志" -ForegroundColor Gray
+Write-Host "    .\deploy.ps1 -Logs        实时跟踪日志" -ForegroundColor Gray
 Write-Host ""
-ssh.exe @SshArgs "${User}@${Server}" "systemctl status hikari-bot --no-pager -l || true"
-
-# ---------- 4. 提示后续操作 ----------
-Write-Step 4 "实时日志（按 Ctrl+C 退出）"
+Write-Host "  服务器上:" -ForegroundColor White
+Write-Host "    systemctl status hikari-bot    查看状态" -ForegroundColor Gray
+Write-Host "    systemctl restart hikari-bot   重启" -ForegroundColor Gray
+Write-Host "    journalctl -u hikari-bot -f    实时日志" -ForegroundColor Gray
 Write-Host ""
-ssh.exe @SshArgs "${User}@${Server}" "journalctl -u hikari-bot -f"

@@ -6,9 +6,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/HIKARI_BOT
+WorkingDirectory=/opt/HIKARI_BOT
 Environment=ENVIRONMENT=prod
-ExecStart=/root/HIKARI_BOT/.venv/bin/python bot.py
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/root/.local/bin:/root/.cargo/bin
+ExecStart=/root/.local/bin/uv run python ./bot.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -17,10 +18,10 @@ StandardError=journal
 # 安全加固
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/root/HIKARI_BOT/data /root/HIKARI_BOT/logs
-ReadOnlyPaths=/root/HIKARI_BOT/.venv
+ProtectSystem=full
+
+# uv 需要写入这些目录
+ReadWritePaths=/opt/HIKARI_BOT/data /opt/HIKARI_BOT/logs /opt/HIKARI_BOT/.venv
 
 [Install]
 WantedBy=multi-user.target

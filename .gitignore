@@ -18,6 +18,10 @@ logs/
 # Message data
 data/
 
-# Env (contains tokens)
+# Config (contains tokens)
+config.json
+config.prod.json
+
+# Env (legacy, contains tokens)
 .env
 .env.prod
