@@ -18,6 +18,7 @@ from nonebot.adapters.onebot.v11 import (
 )
 
 from src.core.config import COBALT_API, SEARXNG_API, SUPER_ADMIN
+from src.core.message_store import get_message_store
 from src.plugins.admin import get_whitelist
 from src.plugins.file_sender import get_file_sender
 
@@ -232,6 +233,31 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "search_chat_history",
+            "description": (
+                "搜索当前会话的聊天记录。"
+                "当用户问'我之前说了什么'、'之前谁提到过xxx'、'翻一下之前的聊天'时调用。"
+                "群聊中只能搜索本群的记录，无法跨群或访问私聊。私聊中只能搜索当前私聊记录。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {
+                        "type": "string",
+                        "description": "搜索关键词（可选，不填则返回最近消息）",
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "返回条数上限，默认 10",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_time",
             "description": "获取当前时间和日期。当用户问'现在几点'、'今天几号'时调用。",
             "parameters": {"type": "object", "properties": {}},
@@ -408,6 +434,61 @@ async def _tool_get_group_info(bot: Bot, group_id: int) -> str:
             lines.extend(members_str)
     else:
         lines.append(f"\n👥 普通成员: {len(member_list)} 人（人数较多，仅列出管理员以上）")
+
+    return "\n".join(lines)
+
+
+async def _tool_search_chat_history(
+    group_id: int | None, user_id: int,
+    keyword: str = "", count: int = 10,
+) -> str:
+    """搜索当前会话的聊天记录（仅限当前群或当前私聊，不可跨上下文）。"""
+    store = get_message_store()
+    count = max(1, min(count, 30))  # 限制 1~30 条
+
+    # 根据上下文获取消息源
+    if group_id is not None:
+        messages = await store.get_group_messages(group_id)
+        scope = f"群 {group_id}"
+    else:
+        messages = await store.get_private_messages(user_id)
+        scope = "私聊"
+
+    if not messages:
+        return f"当前 {scope} 暂无聊天记录"
+
+    # 关键词搜索（不区分大小写）
+    kw = keyword.strip().lower()
+    if kw:
+        matched = []
+        for m in messages:
+            msg_text = str(m.get("message", "")).lower()
+            raw_text = str(m.get("raw_message", "")).lower()
+            sender_info = m.get("sender", {})
+            sender_name = (
+                sender_info.get("card")
+                or sender_info.get("nickname")
+                or str(sender_info.get("user_id", "?"))
+            ).lower()
+            # 搜索消息内容 + 发送者昵称
+            if kw in msg_text or kw in raw_text or kw in sender_name:
+                matched.append(m)
+        messages = matched
+
+    if not messages:
+        return f"在 {scope} 的记录中未找到与「{keyword}」相关的消息"
+
+    # 取最后 N 条
+    recent = messages[-count:]
+
+    lines = [f"{scope} 的聊天记录" + (f"（搜索「{keyword}」，{len(messages)} 条匹配，显示最近 {len(recent)} 条）：" if kw else f"（最近 {len(recent)} 条）：")]
+    for m in recent:
+        sender = m.get("sender", {})
+        uid = sender.get("user_id", "?")
+        nick = sender.get("card") or sender.get("nickname") or str(uid)
+        t = str(m.get("time", ""))[:19]
+        msg = str(m.get("message", ""))[:200]
+        lines.append(f"  [{t}] {nick}(QQ{uid}): {msg}")
 
     return "\n".join(lines)
 
@@ -684,6 +765,12 @@ async def execute_tool(
         if group_id is None:
             return "❌ 此功能仅在群聊中可用"
         return await _tool_get_group_info(bot, group_id)
+    elif tool_name == "search_chat_history":
+        return await _tool_search_chat_history(
+            group_id, user_id,
+            keyword=arguments.get("keyword", ""),
+            count=arguments.get("count", 10),
+        )
     elif tool_name == "search_web":
         return await _tool_search_web(arguments.get("query", ""))
     elif tool_name == "get_time":
