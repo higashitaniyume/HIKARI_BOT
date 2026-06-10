@@ -36,6 +36,7 @@ from nonebot.rule import to_me
 
 from src.core.config import COBALT_API
 from src.plugins.admin import WHITELIST
+from src.plugins.file_sender import get_file_sender
 from src.plugins.media_sender import get_media_sender
 
 logger = logging.getLogger("hikari.plugins.video_parser")
@@ -264,9 +265,51 @@ async def _download_and_send(
         file_url = result.get("url", "")
         filename = result.get("filename", "media")
         logger.info(
-            f"[{service_name}] 开始下载 → {filename} ({file_url[:80]})"
+            f"[{service_name}] 开始处理 → {filename} ({file_url[:80]})"
         )
 
+        # ── 1. HEAD 探测文件大小（不下载） ──────────────────
+        content_length = 0
+        try:
+            async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+                head = await client.head(file_url)
+                content_length = int(head.headers.get("Content-Length", 0))
+                size_mb = content_length / (1024 * 1024)
+                logger.info(f"[{service_name}] 文件大小: {size_mb:.1f} MB (HEAD)")
+        except Exception:
+            logger.debug(f"[{service_name}] HEAD 失败，将直接下载")
+
+        # ── 2. 超大文件 → 发链接 ──────────────────────────
+        if content_length > MAX_DOWNLOAD_SIZE:
+            size_mb = content_length / (1024 * 1024)
+            logger.warning(f"[{service_name}] 文件过大 ({size_mb:.1f} MB)，发送链接")
+            return (
+                f"📥 [{service_name}] {filename}\n"
+                f"文件过大 ({size_mb:.1f} MB)\n下载链接: {file_url}"
+            )
+
+        # ── 3. 超过 QQ 媒体限制 → 当文件发送 ──────────────
+        ext = Path(filename).suffix.lower()
+        is_video = ext in {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
+        qq_media_limit = MAX_QQ_VIDEO_SIZE if is_video else MAX_QQ_UPLOAD_SIZE
+
+        if content_length > qq_media_limit or (content_length == 0 and is_video):
+            # 视频很可能超限，直接当文件发（NapCat 从 URL 下载，不走 base64）
+            # 未知大小的视频也当文件发（安全策略）
+            if content_length > 0 or is_video:
+                logger.info(
+                    f"[{service_name}] 媒体较大，尝试以文件方式发送 → {filename}"
+                )
+                f_sender = get_file_sender()
+                ok = await f_sender.send_file(bot, target=target,
+                                              file_path_or_url=file_url,
+                                              filename=filename)
+                if ok:
+                    return None
+                # 文件发送失败，降级发链接
+                return f"📥 [{service_name}] {filename}\n下载链接: {file_url}"
+
+        # ── 4. 小文件 → 下载后作为媒体发送 ──────────────────
         try:
             async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
                 dl_resp = await client.get(file_url)
@@ -276,35 +319,21 @@ async def _download_and_send(
             size_mb = len(data) / (1024 * 1024)
             logger.info(f"[{service_name}] 下载完成 → {filename} ({size_mb:.1f} MB)")
 
-            # 检查大小限制
-            if len(data) > MAX_DOWNLOAD_SIZE:
-                logger.warning(f"[{service_name}] 文件过大 ({size_mb:.1f} MB)，发送链接")
-                return (
-                    f"📥 [{service_name}] {filename}\n"
-                    f"文件过大 ({size_mb:.1f} MB)\n下载链接: {file_url}"
-                )
-
-            # QQ 上传限制：视频 ≤ 15MB，图片/语音 ≤ 8MB
-            ext = Path(filename).suffix.lower()
-            is_video = ext in {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
-            qq_limit = MAX_QQ_VIDEO_SIZE if is_video else MAX_QQ_UPLOAD_SIZE
-
-            if len(data) > qq_limit:
-                type_label = "视频" if is_video else "文件"
-                logger.warning(
-                    f"[{service_name}] {type_label}过大 ({size_mb:.1f} MB > "
-                    f"{qq_limit / 1024 / 1024:.0f} MB)，超出QQ限制，发送链接"
-                )
-                return (
-                    f"📥 [{service_name}] {filename}\n"
-                    f"{type_label}较大 ({size_mb:.1f} MB)，QQ无法直接发送\n"
-                    f"下载链接: {file_url}"
-                )
+            # 下载后再次确认大小
+            if len(data) > qq_media_limit:
+                logger.info(f"[{service_name}] 实际大小超限 ({size_mb:.1f} MB)，改发文件")
+                f_sender = get_file_sender()
+                ok = await f_sender.send_file(bot, target=target,
+                                              file_path_or_url=file_url,
+                                              filename=filename)
+                if ok:
+                    return None
+                return f"📥 [{service_name}] {filename}\n下载链接: {file_url}"
 
             sender = get_media_sender()
             await sender.send_bytes(bot, target=target, data=data, filename=filename)
             logger.info(f"[{service_name}] 媒体已发送 → {filename}")
-            return None  # 成功，无需文本
+            return None
 
         except httpx.HTTPStatusError as e:
             logger.error(f"[{service_name}] 下载 HTTP 错误: {e.response.status_code}")
@@ -331,7 +360,22 @@ async def _download_and_send(
             if not item_url:
                 continue
 
+            ext = ".jpg" if item_type == "photo" else ".mp4"
+            filename = f"{service_name}_{i+1}_{item_type}{ext}"
+            is_video = item_type == "video"
+
             try:
+                # 视频直接当文件发（更可靠），图片下载后当媒体发
+                if is_video:
+                    logger.info(f"[{service_name}] picker #{i+1} 视频 → 发送文件")
+                    f_sender = get_file_sender()
+                    ok = await f_sender.send_file(bot, target=target,
+                                                  file_path_or_url=item_url,
+                                                  filename=filename)
+                    if ok:
+                        sent += 1
+                    continue
+
                 async with httpx.AsyncClient(timeout=120.0, trust_env=False) as client:
                     dl_resp = await client.get(item_url)
                     dl_resp.raise_for_status()
@@ -341,10 +385,8 @@ async def _download_and_send(
                     logger.warning(f"[{service_name}] picker #{i+1} 过大，跳过")
                     continue
 
-                ext = ".jpg" if item_type == "photo" else ".mp4"
-                filename = f"{service_name}_{i+1}_{item_type}{ext}"
-                sender = get_media_sender()
-                await sender.send_bytes(bot, target=target, data=data, filename=filename)
+                img_sender = get_media_sender()
+                await img_sender.send_bytes(bot, target=target, data=data, filename=filename)
                 sent += 1
                 logger.info(f"[{service_name}] picker #{i+1}/{len(items)} 已发送")
 
@@ -355,7 +397,7 @@ async def _download_and_send(
             return f"❌ [{service_name}] 所有媒体下载失败"
         if sent < len(items):
             return f"📥 [{service_name}] {sent}/{len(items)} 个媒体已发送"
-        return None  # 全部成功
+        return None
 
     if status == "error":
         error_info = result.get("error", {})
