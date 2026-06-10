@@ -143,6 +143,20 @@ def _match_domain(url: str) -> Optional[tuple[str, str]]:
     return None
 
 
+def has_media_url(text: str) -> bool:
+    """检查文本中是否包含支持的媒体 URL。
+
+    供 AI 聊天等模块调用，有媒体链接时跳过 AI 处理。
+    """
+    if not text:
+        return False
+    urls = _extract_urls(text)
+    for url in urls:
+        if _match_domain(url):
+            return True
+    return False
+
+
 # ============================================================================
 # Cobalt API 调用
 # ============================================================================

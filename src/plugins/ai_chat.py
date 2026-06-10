@@ -47,6 +47,7 @@ from src.core.config import (
     MAX_MEMORY_MESSAGES,
 )
 from src.plugins.admin import WHITELIST
+from src.plugins.video_parser import has_media_url
 
 logger = logging.getLogger("hikari.plugins.ai_chat")
 
@@ -287,6 +288,11 @@ async def handle_chat(bot: Bot, event: Event, args: Message = CommandArg()):
     if not text:
         await chat_cmd.finish("用法: /chat <消息>\n发送 /clearmemory 清除记忆")
 
+    # 有媒体链接则跳过，让视频解析模块处理
+    if has_media_url(text):
+        logger.debug("[AI /chat] 检测到媒体URL，跳过")
+        return
+
     group_id = event.group_id if isinstance(event, GroupMessageEvent) else None
 
     # 发送"正在思考..."提示
@@ -318,6 +324,11 @@ async def handle_group_at(bot: Bot, event: Event):
 
     pure_text = event.get_plaintext().strip()
     if not pure_text:
+        return
+
+    # 有媒体链接则跳过，让视频解析模块处理
+    if has_media_url(pure_text):
+        logger.debug(f"[AI @触发] 检测到媒体URL，跳过AI → 群{event.group_id}")
         return
 
     group_id = event.group_id
@@ -353,6 +364,11 @@ async def handle_private_chat(bot: Bot, event: Event):
 
     pure_text = event.get_plaintext().strip()
     if not pure_text:
+        return
+
+    # 有媒体链接则跳过，让视频解析模块处理
+    if has_media_url(pure_text):
+        logger.debug(f"[AI 私聊] 检测到媒体URL，跳过AI → {event.user_id}")
         return
 
     user_id = event.user_id
