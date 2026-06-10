@@ -2,9 +2,7 @@
 视频/媒体解析模块 —— 自动识别消息中的媒体 URL 并通过 Cobalt 解析。
 
 支持服务：
-    YouTube, X/Twitter, TikTok, Instagram, Facebook, Vimeo, SoundCloud,
-    Reddit, Tumblr, Pinterest, Twitch, Snapchat, Dailymotion, VK, OK,
-    Bluesky, Streamable, Newgrounds, Rutube, Loom 等
+    当前仅启用 X/Twitter，其他服务已注释，按需取消注释即可恢复。
 
 触发方式：
     私聊或群聊中发送支持的媒体 URL，自动解析并返回下载链接。
@@ -53,53 +51,53 @@ MAX_QQ_VIDEO_SIZE = 15 * 1024 * 1024  # 15 MB（视频）
 # ============================================================================
 
 SUPPORTED_DOMAINS: dict[str, str] = {
-    # 视频平台
-    # "bilibili.com": "B站",  # 暂时停用：Cobalt 无法稳定解析 B站
-    "youtube.com": "YouTube",
-    "www.youtube.com": "YouTube",
-    "youtu.be": "YouTube",
-    "vimeo.com": "Vimeo",
-    "dailymotion.com": "Dailymotion",
-    "www.dailymotion.com": "Dailymotion",
-    "streamable.com": "Streamable",
-    "www.streamable.com": "Streamable",
-    "rutube.ru": "Rutube",
-    "loom.com": "Loom",
-    "www.loom.com": "Loom",
-
-    # 社交平台
+    # ── 仅启用 X/Twitter ──────────────────────────
     "x.com": "X/Twitter",
     "twitter.com": "X/Twitter",
-    "tiktok.com": "TikTok",
-    "www.tiktok.com": "TikTok",
-    "vm.tiktok.com": "TikTok",
-    "instagram.com": "Instagram",
-    "www.instagram.com": "Instagram",
-    "facebook.com": "Facebook",
-    "www.facebook.com": "Facebook",
-    "fb.watch": "Facebook",
-    "reddit.com": "Reddit",
-    "www.reddit.com": "Reddit",
-    "tumblr.com": "Tumblr",
-    "www.tumblr.com": "Tumblr",
-    "pinterest.com": "Pinterest",
-    "www.pinterest.com": "Pinterest",
-    "snapchat.com": "Snapchat",
-    "www.snapchat.com": "Snapchat",
-    "vk.com": "VK",
-    "www.vk.com": "VK",
-    "ok.ru": "OK",
-    "newgrounds.com": "Newgrounds",
-    "www.newgrounds.com": "Newgrounds",
-    "bsky.app": "Bluesky",
 
-    # 音频
-    "soundcloud.com": "SoundCloud",
-
-    # Twitch
-    "twitch.tv": "Twitch",
-    "www.twitch.tv": "Twitch",
-    "clips.twitch.tv": "Twitch Clips",
+    # ── 以下暂时停用，按需取消注释 ──────────────────
+    # # 视频平台
+    # "bilibili.com": "B站",
+    # "youtube.com": "YouTube",
+    # "www.youtube.com": "YouTube",
+    # "youtu.be": "YouTube",
+    # "vimeo.com": "Vimeo",
+    # "dailymotion.com": "Dailymotion",
+    # "streamable.com": "Streamable",
+    # "rutube.ru": "Rutube",
+    # "loom.com": "Loom",
+    #
+    # # 社交平台
+    # "tiktok.com": "TikTok",
+    # "www.tiktok.com": "TikTok",
+    # "vm.tiktok.com": "TikTok",
+    # "instagram.com": "Instagram",
+    # "www.instagram.com": "Instagram",
+    # "facebook.com": "Facebook",
+    # "www.facebook.com": "Facebook",
+    # "fb.watch": "Facebook",
+    # "reddit.com": "Reddit",
+    # "www.reddit.com": "Reddit",
+    # "tumblr.com": "Tumblr",
+    # "www.tumblr.com": "Tumblr",
+    # "pinterest.com": "Pinterest",
+    # "www.pinterest.com": "Pinterest",
+    # "snapchat.com": "Snapchat",
+    # "www.snapchat.com": "Snapchat",
+    # "vk.com": "VK",
+    # "www.vk.com": "VK",
+    # "ok.ru": "OK",
+    # "newgrounds.com": "Newgrounds",
+    # "www.newgrounds.com": "Newgrounds",
+    # "bsky.app": "Bluesky",
+    #
+    # # 音频
+    # "soundcloud.com": "SoundCloud",
+    #
+    # # Twitch
+    # "twitch.tv": "Twitch",
+    # "www.twitch.tv": "Twitch",
+    # "clips.twitch.tv": "Twitch Clips",
 }
 
 
