@@ -25,7 +25,7 @@ _store = get_message_store()
 
 # ─── 消息事件处理器 ─────────────────────────────────────────────
 
-msg_handler = on_message(priority=99, block=False)
+msg_handler = on_message(priority=80, block=False)
 
 
 @msg_handler.handle()

@@ -1,0 +1,26 @@
+[Unit]
+Description=HIKARI_BOT — NoneBot2 QQ Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/HIKARI_BOT
+Environment=ENVIRONMENT=prod
+ExecStart=/root/HIKARI_BOT/.venv/bin/python bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# 安全加固
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/root/HIKARI_BOT/data /root/HIKARI_BOT/logs
+ReadOnlyPaths=/root/HIKARI_BOT/.venv
+
+[Install]
+WantedBy=multi-user.target

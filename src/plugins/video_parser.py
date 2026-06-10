@@ -30,7 +30,7 @@ from nonebot.adapters.onebot.v11 import (
     MessageSegment,
     PrivateMessageEvent,
 )
-from nonebot.rule import to_me
+from nonebot.rule import Rule, to_me
 
 from src.core.config import COBALT_API
 from src.plugins.admin import WHITELIST
@@ -146,10 +146,7 @@ def _match_domain(url: str) -> Optional[tuple[str, str]]:
 
 
 def has_media_url(text: str) -> bool:
-    """检查文本中是否包含支持的媒体 URL。
-
-    供 AI 聊天等模块调用，有媒体链接时跳过 AI 处理。
-    """
+    """检查文本中是否包含支持的媒体 URL。"""
     if not text:
         return False
     urls = _extract_urls(text)
@@ -157,6 +154,17 @@ def has_media_url(text: str) -> bool:
         if _match_domain(url):
             return True
     return False
+
+
+async def _has_media_url_event(event: Event) -> bool:
+    """Rule 检查：事件消息是否包含媒体 URL。"""
+    if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)):
+        return False
+    return has_media_url(event.get_plaintext().strip())
+
+
+HAS_MEDIA_URL = Rule(_has_media_url_event)
+"""仅当消息包含支持的媒体 URL 时通过的 Rule。"""
 
 
 # ============================================================================
@@ -416,7 +424,7 @@ async def _download_and_send(
 # ============================================================================
 
 # 群聊：@机器人 触发
-group_parser = on_message(rule=to_me() & WHITELIST, priority=85, block=False)
+group_parser = on_message(rule=to_me() & WHITELIST & HAS_MEDIA_URL, priority=85, block=True)
 
 
 @group_parser.handle()
@@ -430,7 +438,7 @@ async def handle_group_parse(bot: Bot, event: Event):
 
 
 # 私聊：任意消息触发
-private_parser = on_message(rule=WHITELIST, priority=96, block=False)
+private_parser = on_message(rule=WHITELIST & HAS_MEDIA_URL, priority=93, block=True)
 
 
 @private_parser.handle()
