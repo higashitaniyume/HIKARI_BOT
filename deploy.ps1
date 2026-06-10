@@ -123,6 +123,8 @@ $UploadItems = @(
     @{Src="pyproject.toml";           Dst="$RemoteDir/pyproject.toml"},
     @{Src="uv.lock";                  Dst="$RemoteDir/uv.lock"},
     @{Src="config.prod.json";         Dst="$RemoteDir/config.prod.json"},
+    @{Src="version.json";             Dst="$RemoteDir/version.json"},
+    @{Src="bump_build.py";            Dst="$RemoteDir/bump_build.py"},
     @{Src="deploy/hikari-bot.service"; Dst="$RemoteDir/hikari-bot.service"},
     @{Src="src";                      Dst="$RemoteDir/"}
 )
