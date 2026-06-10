@@ -1,9 +1,18 @@
 """Per-user AI 对话记忆管理器。
 
-特性：
-    - Token 预算裁剪
-    - 超预算时自动 AI 压缩旧对话为摘要（而非直接丢弃）
-    - 摘要再超时合并摘要（避免摘要越积越多）
+两段式记忆：
+    热记忆（hot）: JSON 格式的最近对话 + 历史摘要，Token 预算裁剪
+    冷记忆（cold）: memory.md，长期存储用户偏好/话题/事实
+
+触发归档：热记忆产生 [历史摘要] 时自动写入冷记忆。
+冷记忆过大时自动 AI 压缩。
+
+目录结构：
+    data/ai_memory/
+    ├── private/{uid}.json       # 热记忆
+    ├── private/{uid}_memory.md  # 冷记忆
+    ├── group/{gid}/{uid}.json
+    └── group/{gid}/{uid}_memory.md
 """
 
 from __future__ import annotations
@@ -12,6 +21,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -26,10 +36,12 @@ from .client import estimate_tokens, estimate_total_tokens
 logger = logging.getLogger("hikari.plugins.agent")
 _MEMORY_CACHE_TTL = 60.0
 
-# 压缩触发阈值：已用 token 超过预算的这个比例时触发压缩
+# 压缩触发阈值
 _SUMMARIZE_THRESHOLD = 0.75
-# 每次压缩的最少消息条数（少于这个不值得压缩）
+# 每次压缩的最少消息条数
 _MIN_SUMMARIZE_PAIRS = 3
+# 冷记忆最大字符数（超过则 AI 压缩）
+_MAX_COLD_MEMORY_CHARS = 3000
 
 
 class MemoryManager:
@@ -184,8 +196,26 @@ class MemoryManager:
 
         return memory
 
-    async def _save(self, file_path: Path, memory: list[dict], cache_key: str) -> None:
+    async def _save(
+        self, file_path: Path, memory: list[dict], cache_key: str,
+        user_id: int, group_id: Optional[int],
+    ) -> None:
         memory = await self._trim_and_summarize(memory)
+
+        # ── 冷记忆归档 ──────────────────────────────
+        # 提取热记忆中的 [历史摘要]，归档到 memory.md
+        summaries = [
+            str(m.get("content", ""))
+            for m in memory
+            if m.get("role") == "system"
+            and str(m.get("content", "")).startswith("[历史摘要]")
+        ]
+        for s in summaries:
+            # 去掉前缀标记
+            clean = s.removeprefix("[历史摘要]").strip()
+            if clean:
+                await self._archive_to_md(user_id, group_id, clean)
+
         self._cache[cache_key] = (time.monotonic(), memory)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(
@@ -212,21 +242,124 @@ class MemoryManager:
             memory = self._load(path, cache_key)
             memory.append({"role": "user", "content": user_msg})
             memory.append({"role": "assistant", "content": assistant_msg})
-            await self._save(path, memory, cache_key)
+            await self._save(path, memory, cache_key, user_id, group_id)
 
     async def clear(self, user_id: int, group_id: Optional[int] = None) -> None:
         cache_key = self._cache_key(user_id, group_id)
         lock = self._get_lock(user_id, group_id)
         async with lock:
             self._cache.pop(cache_key, None)
+            # 清除热记忆
             path = self._file_path(user_id, group_id)
             if path.exists():
                 path.unlink()
-                logger.info(f"记忆已清除: {path}")
+                logger.info(f"热记忆已清除: {path}")
+            # 清除冷记忆
+            md_path = self._memory_md_path(user_id, group_id)
+            if md_path.exists():
+                md_path.unlink()
+                logger.info(f"冷记忆已清除: {md_path}")
 
     async def count(self, user_id: int, group_id: Optional[int] = None) -> int:
         mem = await self.get_memory(user_id, group_id)
         return len(mem)
+
+    # ── 冷记忆（memory.md）────────────────────────────
+
+    def _memory_md_path(self, user_id: int, group_id: Optional[int]) -> Path:
+        if group_id is not None:
+            return self._base / "group" / str(group_id) / f"{user_id}_memory.md"
+        return self._base / "private" / f"{user_id}_memory.md"
+
+    async def get_long_term_memory(
+        self, user_id: int, group_id: Optional[int] = None,
+    ) -> str:
+        """获取冷记忆内容（用于注入 system prompt）。"""
+        path = self._memory_md_path(user_id, group_id)
+        if not path.exists():
+            return ""
+        try:
+            content = path.read_text(encoding="utf-8").strip()
+            if content:
+                return f"[关于此用户的长期记忆]\n{content}"
+        except Exception as e:
+            logger.warning(f"读取冷记忆失败: {path} — {e}")
+        return ""
+
+    async def _archive_to_md(
+        self, user_id: int, group_id: Optional[int], summary: str,
+    ) -> None:
+        """将热记忆摘要归档到冷记忆 memory.md。"""
+        if not summary:
+            return
+
+        path = self._memory_md_path(user_id, group_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        new_entry = f"## {date_str}\n{summary}\n"
+
+        existing = ""
+        if path.exists():
+            try:
+                existing = path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+        combined = existing + "\n" + new_entry if existing else new_entry
+
+        # 冷记忆过大 → AI 压缩
+        if len(combined) > _MAX_COLD_MEMORY_CHARS:
+            compressed = await self._summarize_cold_memory(combined)
+            if compressed:
+                combined = f"# 压缩于 {date_str}\n{compressed}\n"
+                logger.info(f"冷记忆已压缩: {len(existing)} → {len(combined)} 字符")
+
+        path.write_text(combined.strip() + "\n", encoding="utf-8")
+        logger.info(f"已归档到冷记忆: {path}")
+
+    async def _summarize_cold_memory(self, content: str) -> str:
+        """AI 压缩过大的冷记忆。"""
+        from .client import get_client
+
+        if len(content) < 500:
+            return content
+
+        prompt = (
+            "请将以下用户的长期记忆内容压缩整理，保留所有关键事实：\n"
+            "- 用户的身份、偏好、习惯\n"
+            "- 重要的话题和决定\n"
+            "- 用户明确提到的个人信息\n"
+            "- 按时间倒序排列\n\n"
+            f"{content[-4000:]}"  # 只取最后 4000 字符
+        )
+
+        try:
+            client = get_client()
+            resp = await client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=[
+                    {"role": "system", "content": "你是一个信息整理助手，用中文输出。"},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=512,
+                temperature=0.3,
+            )
+            return (resp.choices[0].message.content or "").strip()
+        except Exception as e:
+            logger.warning(f"冷记忆压缩失败: {e}")
+            return content
+
+    # ── 清除冷记忆 ────────────────────────────────────
+
+    async def clear_long_term_memory(
+        self, user_id: int, group_id: Optional[int] = None,
+    ) -> None:
+        """清除冷记忆文件。"""
+        path = self._memory_md_path(user_id, group_id)
+        if path.exists():
+            path.unlink()
+            logger.info(f"冷记忆已清除: {path}")
 
 
 # 全局单例

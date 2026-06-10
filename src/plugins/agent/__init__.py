@@ -158,6 +158,11 @@ async def _agent_loop(
     # ── 构建系统提示词 ──────────────────────────────
     system_prompt = get_system_prompt() + _build_time_hint(user_id, group_id)
 
+    # ── 长期记忆（memory.md）─────────────────────────
+    long_term = await mem.get_long_term_memory(user_id, group_id)
+    if long_term:
+        system_prompt += "\n\n" + long_term
+
     # ── 群聊上下文 ──────────────────────────────────
     group_context = ""
     if group_id:
