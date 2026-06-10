@@ -175,6 +175,117 @@ class MediaSender:
             path.stat().st_size,
         )
 
+    # ── bytes 发送方法（供视频解析等场景直接传入下载好的数据）──
+
+    @classmethod
+    def _bytes_to_b64(cls, data: bytes) -> str:
+        return f"base64://{base64.b64encode(data).decode('ascii')}"
+
+    @staticmethod
+    def _guess_type(filename: str) -> str:
+        """根据扩展名推断媒体类型: image / video / voice。"""
+        ext = Path(filename).suffix.lower()
+        image_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico"}
+        video_exts = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
+        voice_exts = {".mp3", ".wav", ".ogg", ".aac", ".flac", ".amr", ".silk", ".opus", ".m4a"}
+        if ext in image_exts:
+            return "image"
+        if ext in video_exts:
+            return "video"
+        if ext in voice_exts:
+            return "voice"
+        return "image"  # 兜底当作图片
+
+    @classmethod
+    async def send_bytes(
+        cls,
+        bot: Bot,
+        target: Union[int, str],
+        data: bytes,
+        filename: str = "media",
+    ) -> None:
+        """发送媒体字节数据，自动判断类型。
+
+        Args:
+            bot: Bot 实例
+            target: 私聊 QQ 号 或 "group:群号"
+            data: 文件字节数据
+            filename: 原始文件名（用于推断类型）
+        """
+        media_type = cls._guess_type(filename)
+        if media_type == "image":
+            await cls.send_image_bytes(bot, target, data, filename)
+        elif media_type == "video":
+            await cls.send_video_bytes(bot, target, data, filename)
+        else:
+            await cls.send_voice_bytes(bot, target, data, filename)
+
+    @classmethod
+    async def send_image_bytes(
+        cls,
+        bot: Bot,
+        target: Union[int, str],
+        data: bytes,
+        filename: str = "image",
+    ) -> None:
+        ref = cls._bytes_to_b64(data)
+        img = MessageSegment.image(ref)
+        is_group, target_id = cls._parse_target(target)
+        if is_group:
+            await bot.send_group_msg(group_id=target_id, message=img)
+        else:
+            await bot.send_private_msg(user_id=target_id, message=img)
+        logger.info(
+            "图片(bytes)已发送 -> %s: %s (%d bytes)",
+            f"群{target_id}" if is_group else f"QQ{target_id}",
+            filename,
+            len(data),
+        )
+
+    @classmethod
+    async def send_video_bytes(
+        cls,
+        bot: Bot,
+        target: Union[int, str],
+        data: bytes,
+        filename: str = "video",
+    ) -> None:
+        ref = cls._bytes_to_b64(data)
+        vid = MessageSegment.video(ref)
+        is_group, target_id = cls._parse_target(target)
+        if is_group:
+            await bot.send_group_msg(group_id=target_id, message=vid)
+        else:
+            await bot.send_private_msg(user_id=target_id, message=vid)
+        logger.info(
+            "视频(bytes)已发送 -> %s: %s (%d bytes)",
+            f"群{target_id}" if is_group else f"QQ{target_id}",
+            filename,
+            len(data),
+        )
+
+    @classmethod
+    async def send_voice_bytes(
+        cls,
+        bot: Bot,
+        target: Union[int, str],
+        data: bytes,
+        filename: str = "voice",
+    ) -> None:
+        ref = cls._bytes_to_b64(data)
+        voice = MessageSegment.record(ref)
+        is_group, target_id = cls._parse_target(target)
+        if is_group:
+            await bot.send_group_msg(group_id=target_id, message=voice)
+        else:
+            await bot.send_private_msg(user_id=target_id, message=voice)
+        logger.info(
+            "语音(bytes)已发送 -> %s: %s (%d bytes)",
+            f"群{target_id}" if is_group else f"QQ{target_id}",
+            filename,
+            len(data),
+        )
+
     @classmethod
     async def send_voice(
         cls,
