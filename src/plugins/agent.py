@@ -1057,17 +1057,9 @@ async def handle_agent(bot: Bot, event: Event):
     location = f"群{group_id}" if group_id else f"私聊"
     logger.info(f"[Agent] {location} {user_id}: {pure_text[:100]}")
 
-    # 频率限制
-    allowed, remaining = _check_cooldown(user_id, group_id)
+    # 频率限制（静默：超频时直接忽略，不回复提示）
+    allowed, _ = _check_cooldown(user_id, group_id)
     if not allowed:
-        msg = f"⏳ 冷却中，请 {remaining:.0f} 秒后再试~"
-        if isinstance(event, GroupMessageEvent):
-            await bot.send_group_msg(
-                group_id=event.group_id,
-                message=MessageSegment.at(user_id) + MessageSegment.text("\n" + msg),
-            )
-        else:
-            await bot.send_private_msg(user_id=user_id, message=msg)
         return
 
     _set_cooldown(user_id, group_id)
