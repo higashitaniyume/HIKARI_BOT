@@ -203,7 +203,7 @@ class MemoryManager:
         memory = await self._trim_and_summarize(memory)
 
         # ── 冷记忆归档 ──────────────────────────────
-        # 提取热记忆中的 [历史摘要]，归档到 memory.md
+        # 提取热记忆中的 [历史摘要]，归档到用户冷记忆 + 群共享记忆
         summaries = [
             str(m.get("content", ""))
             for m in memory
@@ -211,10 +211,11 @@ class MemoryManager:
             and str(m.get("content", "")).startswith("[历史摘要]")
         ]
         for s in summaries:
-            # 去掉前缀标记
             clean = s.removeprefix("[历史摘要]").strip()
             if clean:
                 await self._archive_to_md(user_id, group_id, clean)
+                if group_id is not None:
+                    await self._archive_to_group_memory(group_id, clean)
 
         self._cache[cache_key] = (time.monotonic(), memory)
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -349,6 +350,53 @@ class MemoryManager:
         except Exception as e:
             logger.warning(f"冷记忆压缩失败: {e}")
             return content
+
+    # ── 群聊记忆（整个群的共享冷记忆）──────────────────
+
+    def _group_memory_path(self, group_id: int) -> Path:
+        return self._base / "group" / str(group_id) / "_group.md"
+
+    async def get_group_memory(self, group_id: int) -> str:
+        """获取群聊共享记忆，用于注入 system prompt。"""
+        path = self._group_memory_path(group_id)
+        if not path.exists():
+            return ""
+        try:
+            content = path.read_text(encoding="utf-8").strip()
+            if content:
+                return f"[关于本群的共享记忆]\n{content}"
+        except Exception as e:
+            logger.warning(f"读取群记忆失败: {path} — {e}")
+        return ""
+
+    async def _archive_to_group_memory(self, group_id: int, summary: str) -> None:
+        """将热记忆摘要归档到群共享 memory.md。"""
+        if not summary:
+            return
+
+        path = self._group_memory_path(group_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        new_entry = f"## {date_str}\n{summary}\n"
+
+        existing = ""
+        if path.exists():
+            try:
+                existing = path.read_text(encoding="utf-8")
+            except Exception:
+                pass
+
+        combined = existing + "\n" + new_entry if existing else new_entry
+
+        if len(combined) > _MAX_COLD_MEMORY_CHARS:
+            compressed = await self._summarize_cold_memory(combined)
+            if compressed:
+                combined = f"# 压缩于 {date_str}\n{compressed}\n"
+                logger.info(f"群记忆已压缩: {len(existing)} → {len(combined)} 字符")
+
+        path.write_text(combined.strip() + "\n", encoding="utf-8")
+        logger.info(f"已归档到群记忆: {path}")
 
     # ── 清除冷记忆 ────────────────────────────────────
 

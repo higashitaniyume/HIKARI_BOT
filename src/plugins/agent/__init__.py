@@ -159,6 +159,11 @@ async def _agent_loop(
     system_prompt = get_system_prompt() + _build_time_hint(user_id, group_id)
 
     # ── 长期记忆（memory.md）─────────────────────────
+    # 先注入群共享记忆，再注入个人记忆
+    if group_id:
+        group_mem = await mem.get_group_memory(group_id)
+        if group_mem:
+            system_prompt += "\n\n" + group_mem
     long_term = await mem.get_long_term_memory(user_id, group_id)
     if long_term:
         system_prompt += "\n\n" + long_term
