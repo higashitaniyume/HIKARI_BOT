@@ -57,6 +57,7 @@ from src.core.config import (
     get_system_prompt,
 )
 from src.plugins.admin import WHITELIST
+from src.plugins.video_parser import has_media_url
 
 logger = logging.getLogger("hikari.plugins.ai_chat")
 
@@ -509,10 +510,29 @@ async def handle_chat(bot: Bot, event: Event, args: Message = CommandArg()):
 # ============================================================================
 
 from nonebot import on_message
+from nonebot.rule import Rule
+
+
+def _not_command(event: Event) -> bool:
+    """排除命令消息（以 / 开头）。"""
+    return not event.get_plaintext().strip().startswith("/")
+
+
+def _not_media_url(event: Event) -> bool:
+    """排除包含媒体 URL 的消息（交给 video_parser 处理）。"""
+    return not has_media_url(event.get_plaintext().strip())
+
+
+NOT_COMMAND = Rule(_not_command)
+NOT_MEDIA_URL = Rule(_not_media_url)
 
 # ── 群内 @机器人 ─────────────────────────────────────────
 
-group_at_handler = on_message(rule=to_me() & WHITELIST, priority=90, block=False)
+group_at_handler = on_message(
+    rule=to_me() & WHITELIST & NOT_COMMAND & NOT_MEDIA_URL,
+    priority=90,
+    block=False,
+)
 
 
 @group_at_handler.handle()
@@ -565,7 +585,7 @@ async def handle_group_at(bot: Bot, event: Event):
 # ── 私聊任意消息（带鉴权）─────────────────────────────────
 
 private_handler = on_message(
-    rule=WHITELIST,
+    rule=WHITELIST & NOT_COMMAND & NOT_MEDIA_URL,
     priority=95,
     block=False,
 )
