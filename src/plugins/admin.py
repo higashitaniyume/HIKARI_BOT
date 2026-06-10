@@ -144,10 +144,8 @@ class WhitelistManager:
             return True
         self._check_reload()
         if isinstance(event, GroupMessageEvent):
-            return (
-                event.group_id in self._data.get("groups", [])
-                or user_id in self._data.get("users", [])
-            )
+            # 群聊只看群号是否在白名单，不检查个人
+            return event.group_id in self._data.get("groups", [])
         else:
             return user_id in self._data.get("users", [])
 
