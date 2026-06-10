@@ -108,7 +108,7 @@ def get_system_prompt() -> str:
 # AI 记忆
 # ============================================================================
 
-MAX_MEMORY_MESSAGES: int = int(_get("ai_memory.max_messages", 20))
+MAX_MEMORY_MESSAGES: int = int(_get("ai_memory.max_messages", 40))
 AI_MEMORY_DIR: str = _get("ai_memory.dir", "data/ai_memory")
 
 # ============================================================================
@@ -122,6 +122,12 @@ WHITELIST_FILE: str = _get("whitelist.file", "data/admin/whitelist.json")
 # ============================================================================
 
 COBALT_API: str = _get("cobalt.api", "http://127.0.0.1:9000/")
+
+# ============================================================================
+# SearXNG 网页搜索
+# ============================================================================
+
+SEARXNG_API: str = _get("searxng.api", "http://127.0.0.1:54259/")
 
 # ============================================================================
 # 版本信息（version.json）

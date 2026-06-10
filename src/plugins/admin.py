@@ -144,51 +144,54 @@ class WhitelistManager:
             return True
         self._check_reload()
         if isinstance(event, GroupMessageEvent):
-            return (
-                event.group_id in self._data.get("groups", [])
-                or user_id in self._data.get("users", [])
-            )
+            # 群聊只看群号是否在白名单，不检查个人
+            return event.group_id in self._data.get("groups", [])
         else:
             return user_id in self._data.get("users", [])
 
-    # ── 管理操作（需持有锁，调用方负责加锁）───────────────
+    # ── 管理操作（内部持有锁，防止并发写入竞态）──────────
 
     async def add_user(self, user_id: int) -> None:
-        self._check_reload()
-        if user_id not in self._data["users"]:
-            self._data["users"].append(user_id)
-            self._write_json(self._data)
-            self._load()
+        async with self._lock:
+            self._check_reload()
+            if user_id not in self._data["users"]:
+                self._data["users"].append(user_id)
+                self._write_json(self._data)
+                self._load()
 
     async def remove_user(self, user_id: int) -> None:
         if user_id == SUPER_ADMIN:
             return  # 不能移除超级管理员
-        self._check_reload()
-        if user_id in self._data["users"]:
-            self._data["users"].remove(user_id)
-            self._write_json(self._data)
-            self._load()
+        async with self._lock:
+            self._check_reload()
+            if user_id in self._data["users"]:
+                self._data["users"].remove(user_id)
+                self._write_json(self._data)
+                self._load()
 
     async def add_group(self, group_id: int) -> None:
-        self._check_reload()
-        if group_id not in self._data["groups"]:
-            self._data["groups"].append(group_id)
-            self._write_json(self._data)
-            self._load()
+        async with self._lock:
+            self._check_reload()
+            if group_id not in self._data["groups"]:
+                self._data["groups"].append(group_id)
+                self._write_json(self._data)
+                self._load()
 
     async def remove_group(self, group_id: int) -> None:
-        self._check_reload()
-        if group_id in self._data["groups"]:
-            self._data["groups"].remove(group_id)
-            self._write_json(self._data)
-            self._load()
+        async with self._lock:
+            self._check_reload()
+            if group_id in self._data["groups"]:
+                self._data["groups"].remove(group_id)
+                self._write_json(self._data)
+                self._load()
 
     async def get_list(self) -> dict:
-        self._check_reload()
-        return {
-            "users": list(self._data.get("users", [])),
-            "groups": list(self._data.get("groups", [])),
-        }
+        async with self._lock:
+            self._check_reload()
+            return {
+                "users": list(self._data.get("users", [])),
+                "groups": list(self._data.get("groups", [])),
+            }
 
 
 # ============================================================================

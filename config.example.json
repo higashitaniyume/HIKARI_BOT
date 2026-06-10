@@ -15,7 +15,7 @@
         "file": "prompts/hikari.txt"
     },
     "ai_memory": {
-        "max_messages": 20,
+        "max_messages": 40,
         "dir": "data/ai_memory"
     },
     "whitelist": {
@@ -23,5 +23,8 @@
     },
     "cobalt": {
         "api": "http://127.0.0.1:9000/"
+    },
+    "searxng": {
+        "api": "http://127.0.0.1:54259/"
     }
 }
