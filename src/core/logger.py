@@ -1,109 +1,105 @@
-"""日志系统 —— 按日期分文件写入，启动时自动清理超过 30 天的旧日志。
+"""日志系统 —— 按日期自动分文件、保留最近 30 天。
 
-使用方式：
-    from src.core.logger import setup_logging
-    setup_logging()          # 在 nonebot.init() 之前调用
-
-    import logging
-    logger = logging.getLogger("hikari.xxx")
-    logger.info("...")
+每次写日志前检查当前日期：
+    - 日期变了 → 自动切到新文件 HIKARI_BOT_YYYY-MM-DD.log
+    - 启动时 → 清理超过 30 天的旧文件
 """
 
 import logging
-import logging.handlers
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
 
 
-# 日志格式：时间 | 级别 | 模块 | 消息
 LOG_FORMAT = logging.Formatter(
     fmt="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-# 日志文件名匹配模式
 _LOG_PATTERN = re.compile(r"HIKARI_BOT_(\d{4}-\d{2}-\d{2})\.log")
 
 
 def _cleanup_old_logs(log_dir: Path, max_days: int = 30) -> None:
-    """删除超过 max_days 天的旧日志文件。"""
     cutoff = datetime.now() - timedelta(days=max_days)
     for f in log_dir.iterdir():
         m = _LOG_PATTERN.match(f.name)
         if not m:
             continue
         try:
-            file_date = datetime.strptime(m.group(1), "%Y-%m-%d")
-            if file_date < cutoff:
+            if datetime.strptime(m.group(1), "%Y-%m-%d") < cutoff:
                 f.unlink()
         except ValueError:
             pass
 
 
+class DailyRotatingFileHandler(logging.Handler):
+    """每次 emit 时检查日期，跨天自动切换到新文件。"""
+
+    def __init__(self, log_dir: Path, encoding: str = "utf-8"):
+        super().__init__()
+        self._log_dir = log_dir
+        self._encoding = encoding
+        self._current_date: str = ""
+        self._file = None
+        self._open_for_today()
+
+    def _open_for_today(self) -> None:
+        today = datetime.now().strftime("%Y-%m-%d")
+        if today == self._current_date:
+            return
+        # 关旧文件
+        if self._file:
+            self._file.close()
+        # 开新文件
+        self._current_date = today
+        path = self._log_dir / f"HIKARI_BOT_{today}.log"
+        self._file = open(path, "a", encoding=self._encoding)
+        self._file_path = str(path)
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._open_for_today()
+            self._file.write(self.format(record) + "\n")
+            self._file.flush()
+        except Exception:
+            pass  # 日志写失败不能崩 bot
+
+    def close(self) -> None:
+        if self._file:
+            self._file.close()
+        super().close()
+
+
 def setup_logging(log_dir: str = "logs", *, level: int = logging.DEBUG) -> None:
-    """初始化日志系统。
-
-    - 控制台输出（INFO 及以上）
-    - 文件输出（DEBUG 及以上），按日期分文件，保留 30 天
-    - 每次启动时清理过期日志
-
-    Args:
-        log_dir: 日志文件存放目录，默认为项目根目录下的 logs/
-        level: 日志级别，默认 DEBUG
-    """
     log_path = Path(log_dir)
     log_path.mkdir(parents=True, exist_ok=True)
 
-    # ─── 清理旧日志 ──────────────────────────────────────────
+    # 清理旧日志
     _cleanup_old_logs(log_path)
 
-    # ─── 根 logger 配置 ───────────────────────────────────────
     root = logging.getLogger()
     root.setLevel(level)
-
-    # 清除已有 handler（避免重复添加）
     root.handlers.clear()
 
-    # ─── 控制台 handler ───────────────────────────────────────
+    # 控制台
     console = logging.StreamHandler()
     console.setLevel(logging.INFO)
     console.setFormatter(LOG_FORMAT)
     root.addHandler(console)
 
-    # ─── 文件 handler（每日轮转 + 启动时补轮转）─────────────────────
-    main_log = log_path / "HIKARI_BOT.log"
-
-    # 启动时检查：把上次遗留的日志重命名为日期文件
-    if main_log.exists():
-        mtime = datetime.fromtimestamp(main_log.stat().st_mtime)
-        old_date = mtime.strftime("%Y-%m-%d")
-        today = datetime.now().strftime("%Y-%m-%d")
-        if old_date != today:
-            archive = log_path / f"HIKARI_BOT_{old_date}.log"
-            main_log.rename(archive)
-
-    file_handler = logging.handlers.TimedRotatingFileHandler(
-        filename=str(main_log),
-        when="midnight",
-        interval=1,
-        backupCount=30,
-        encoding="utf-8",
-    )
+    # 文件（按日自动分割）
+    file_handler = DailyRotatingFileHandler(log_path)
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(LOG_FORMAT)
-    # 禁用自动添加的 .YYYY-MM-DD 后缀（我们自己管理）
-    file_handler.suffix = "%Y-%m-%d"
     root.addHandler(file_handler)
 
-    # ─── 降低第三方库日志噪音 ───────────────────────────────────
     for lib in ("websockets", "httpx", "httpcore", "urllib3"):
         logging.getLogger(lib).setLevel(logging.WARNING)
 
-    # ─── 启动标记 ──────────────────────────────────────────────
+    today = datetime.now().strftime("%Y-%m-%d")
     boot_logger = logging.getLogger("hikari")
     boot_logger.info("━" * 50)
     boot_logger.info("HIKARI_BOT 日志系统已就绪")
     boot_logger.info(f"日志目录: {log_path.resolve()}")
-    boot_logger.info(f"当前文件: {log_file.name}")
+    boot_logger.info(f"当前文件: HIKARI_BOT_{today}.log")
     boot_logger.info("━" * 50)
