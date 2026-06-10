@@ -24,7 +24,7 @@ from nonebot.adapters.onebot.v11 import (
     MessageSegment,
     PrivateMessageEvent,
 )
-from nonebot.rule import Rule, to_me
+from nonebot.rule import Rule
 
 from src.core.config import get_system_prompt
 from src.core.message_store import get_message_store
@@ -245,7 +245,7 @@ async def _need_me_rule(event: Event) -> bool:
     if isinstance(event, PrivateMessageEvent):
         return True
     if isinstance(event, GroupMessageEvent):
-        return await to_me()(event)
+        return event.is_tome()
     return False
 
 
