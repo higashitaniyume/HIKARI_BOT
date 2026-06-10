@@ -1,10 +1,9 @@
 """上线通知插件 —— Bot 连接成功后向指定 QQ 发送问候消息和测试图片。"""
 
-import base64
-from pathlib import Path
-
 from nonebot import on_type, get_bot, logger
-from nonebot.adapters.onebot.v11 import LifecycleMetaEvent, MessageSegment
+from nonebot.adapters.onebot.v11 import LifecycleMetaEvent
+
+from src.plugins.media_sender import get_media_sender
 
 # 目标 QQ 号
 TARGET_QQ = 3433559280
@@ -31,7 +30,7 @@ async def handle_lifecycle(event: LifecycleMetaEvent):
         bot = get_bot()
         logger.info(f"HIKARI_BOT 已上线！Bot self_id={event.self_id}")
 
-        # ── 发送文字问候 ──────────────────────────────
+        # ── 文字问候 ──────────────────────────────
         try:
             await bot.send_private_msg(
                 user_id=TARGET_QQ,
@@ -41,24 +40,14 @@ async def handle_lifecycle(event: LifecycleMetaEvent):
         except Exception as e:
             logger.error(f"发送上线通知失败: {e}")
 
-        # ── 发送测试图片 ──────────────────────────────
+        # ── 测试图片（委托给媒体模块） ────────────────
         if AUTO_IMAGE_PATH:
-            img_path = Path(AUTO_IMAGE_PATH)
-            if img_path.exists():
-                try:
-                    img_data = img_path.read_bytes()
-                    b64 = base64.b64encode(img_data).decode("ascii")
-                    await bot.send_private_msg(
-                        user_id=TARGET_QQ,
-                        message=MessageSegment.image(f"base64://{b64}"),
-                    )
-                    logger.success(
-                        f"测试图片已发送至 QQ {TARGET_QQ}: {img_path.name} "
-                        f"({len(img_data)} bytes)"
-                    )
-                except Exception as e:
-                    logger.error(f"发送测试图片失败: {e}")
-            else:
-                logger.warning(f"测试图片不存在，跳过: {img_path}")
+            try:
+                sender = get_media_sender()
+                await sender.send_image(bot, target=TARGET_QQ, file_path=AUTO_IMAGE_PATH)
+            except FileNotFoundError:
+                logger.warning(f"测试图片不存在，跳过: {AUTO_IMAGE_PATH}")
+            except Exception as e:
+                logger.error(f"发送测试图片失败: {e}")
 
         _sent = True
