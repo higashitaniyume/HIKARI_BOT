@@ -21,7 +21,7 @@ PrivateTmp=yes
 ProtectSystem=full
 
 # uv 需要写入这些目录
-ReadWritePaths=/opt/HIKARI_BOT/data /opt/HIKARI_BOT/logs /opt/HIKARI_BOT/.venv
+ReadWritePaths=/opt/HIKARI_BOT/data /opt/HIKARI_BOT/logs /opt/HIKARI_BOT/.venv /opt/HIKARI_BOT/prompts
 
 [Install]
 WantedBy=multi-user.target
