@@ -2,7 +2,7 @@
 视频/媒体解析模块 —— 自动识别消息中的媒体 URL 并通过 Cobalt 解析。
 
 支持服务：
-    B站, YouTube, X/Twitter, TikTok, Instagram, Facebook, Vimeo, SoundCloud,
+    YouTube, X/Twitter, TikTok, Instagram, Facebook, Vimeo, SoundCloud,
     Reddit, Tumblr, Pinterest, Twitch, Snapchat, Dailymotion, VK, OK,
     Bluesky, Streamable, Newgrounds, Rutube, Loom 等
 
@@ -48,9 +48,7 @@ MAX_DOWNLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
 
 SUPPORTED_DOMAINS: dict[str, str] = {
     # 视频平台
-    "bilibili.com": "B站",
-    "www.bilibili.com": "B站",
-    "b23.tv": "B站",
+    # "bilibili.com": "B站",  # 暂时停用：Cobalt 无法稳定解析 B站
     "youtube.com": "YouTube",
     "www.youtube.com": "YouTube",
     "youtu.be": "YouTube",
