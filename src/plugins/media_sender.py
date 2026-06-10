@@ -27,6 +27,8 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
 from nonebot.params import CommandArg
 
+from src.plugins.admin import WHITELIST
+
 logger = logging.getLogger("hikari.plugins.media_sender")
 
 # 默认协议：base64（跨机器）或 file（同机部署时更快）
@@ -268,7 +270,7 @@ async def _handle_media(
 
 # ── 图片命令 ──────────────────────────────────────────────
 
-send_img_cmd = on_command("sendimg", priority=10)
+send_img_cmd = on_command("sendimg", rule=WHITELIST, priority=10)
 
 
 @send_img_cmd.handle()
@@ -302,7 +304,7 @@ async def handle_sendimg(bot: Bot, args: Message = CommandArg()):
 
 # ── 视频命令 ──────────────────────────────────────────────
 
-send_video_cmd = on_command("sendvideo", priority=10)
+send_video_cmd = on_command("sendvideo", rule=WHITELIST, priority=10)
 
 
 @send_video_cmd.handle()
@@ -336,7 +338,7 @@ async def handle_sendvideo(bot: Bot, args: Message = CommandArg()):
 
 # ── 语音命令 ──────────────────────────────────────────────
 
-send_voice_cmd = on_command("sendvoice", priority=10)
+send_voice_cmd = on_command("sendvoice", rule=WHITELIST, priority=10)
 
 
 @send_voice_cmd.handle()
