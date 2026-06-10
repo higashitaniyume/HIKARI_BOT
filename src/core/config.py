@@ -39,3 +39,9 @@ AI_MEMORY_DIR: str = os.getenv("AI_MEMORY_DIR", "data/ai_memory")
 # ============================================================================
 
 WHITELIST_FILE: str = os.getenv("WHITELIST_FILE", "data/admin/whitelist.json")
+
+# ============================================================================
+# Cobalt 视频解析
+# ============================================================================
+
+COBALT_API: str = os.getenv("COBALT_API", "http://192.168.31.2:9000/")
