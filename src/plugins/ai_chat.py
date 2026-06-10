@@ -53,8 +53,8 @@ from src.core.config import (
     DEEPSEEK_API_KEY,
     DEEPSEEK_BASE_URL,
     DEEPSEEK_MODEL,
-    DEEPSEEK_SYSTEM_PROMPT,
     MAX_MEMORY_MESSAGES,
+    get_system_prompt,
 )
 from src.plugins.admin import WHITELIST
 
@@ -264,7 +264,7 @@ class MemoryManager:
         (user, assistant) 成对丢弃。
         """
         max_tokens = max(2000, MAX_MEMORY_MESSAGES * 50)
-        system_tokens = _estimate_tokens(DEEPSEEK_SYSTEM_PROMPT) + 4
+        system_tokens = _estimate_tokens(get_system_prompt()) + 4
         budget = max(200, max_tokens - system_tokens)
 
         while memory:
@@ -464,7 +464,7 @@ async def _do_chat(
 
     # 构建上下文
     history = await mem.get_memory(user_id, group_id)
-    messages: list[dict] = [{"role": "system", "content": DEEPSEEK_SYSTEM_PROMPT}]
+    messages: list[dict] = [{"role": "system", "content": get_system_prompt()}]
     messages.extend(history)
     messages.append({"role": "user", "content": message})
 

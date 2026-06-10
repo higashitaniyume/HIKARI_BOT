@@ -9,8 +9,10 @@
     "deepseek": {
         "api_key": "sk-your-deepseek-api-key",
         "base_url": "https://api.deepseek.com",
-        "model": "deepseek-chat",
-        "system_prompt": "你是一个可爱的QQ机器人，名叫HIKARI。请用中文回复，语气活泼可爱。"
+        "model": "deepseek-chat"
+    },
+    "prompt": {
+        "file": "prompts/hikari.txt"
     },
     "ai_memory": {
         "max_messages": 20,

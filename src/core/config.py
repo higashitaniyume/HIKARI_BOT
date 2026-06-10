@@ -80,10 +80,29 @@ SUPER_ADMIN: int = 3433559280
 DEEPSEEK_API_KEY: str = _get("deepseek.api_key", "")
 DEEPSEEK_BASE_URL: str = _get("deepseek.base_url", "https://api.deepseek.com")
 DEEPSEEK_MODEL: str = _get("deepseek.model", "deepseek-chat")
-DEEPSEEK_SYSTEM_PROMPT: str = _get(
-    "deepseek.system_prompt",
-    "你是一个可爱的QQ机器人，名叫HIKARI。请用中文回复，语气活泼可爱。",
-)
+# 项目根目录（用于解析相对路径）
+_ROOT = _CONFIG_FILE.parent
+
+# 系统提示词文件路径（相对于项目根目录）
+PROMPT_FILE: str = _get("prompt.file", "prompts/hikari.txt")
+
+# 兜底系统提示词（prompt 文件不存在时使用）
+_FALLBACK_SYSTEM_PROMPT = "你是一个可爱的QQ机器人，名叫HIKARI。请用中文回复，语气活泼可爱。"
+
+
+def get_system_prompt() -> str:
+    """读取系统提示词（从 prompt 文件读取，支持 UTF-8 编码的 .txt/.md 文件）。
+
+    若文件不存在则返回兜底提示词。
+    """
+    prompt_path = _ROOT / PROMPT_FILE
+    try:
+        if prompt_path.exists():
+            return prompt_path.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning(f"无法读取系统提示词文件 {prompt_path}: {e}")
+    logger.warning(f"系统提示词文件不存在: {prompt_path}，使用兜底提示词")
+    return _FALLBACK_SYSTEM_PROMPT
 
 # ============================================================================
 # AI 记忆
@@ -109,7 +128,7 @@ COBALT_API: str = _get("cobalt.api", "http://127.0.0.1:9000/")
 # ============================================================================
 
 # 从项目根目录的 version.json 读取版本号和构建号
-_VERSION_PATH = _CONFIG_FILE.parent / "version.json"
+_VERSION_PATH = _ROOT / "version.json"
 
 
 def get_version() -> str:

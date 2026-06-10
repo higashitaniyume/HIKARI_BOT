@@ -116,7 +116,7 @@ Write-Step 1 "上传项目文件" 4
 $LocalRoot = $PSScriptRoot
 
 Write-Host "  创建远程目录..." -ForegroundColor Gray
-Invoke-SSH "mkdir -p $RemoteDir/data/ai_memory $RemoteDir/data/admin $RemoteDir/logs"
+Invoke-SSH "mkdir -p $RemoteDir/data/ai_memory $RemoteDir/data/admin $RemoteDir/logs $RemoteDir/prompts"
 
 $UploadItems = @(
     @{Src="bot.py";                   Dst="$RemoteDir/bot.py"},
@@ -125,6 +125,7 @@ $UploadItems = @(
     @{Src="config.prod.json";         Dst="$RemoteDir/config.prod.json"},
     @{Src="version.json";             Dst="$RemoteDir/version.json"},
     @{Src="bump_build.py";            Dst="$RemoteDir/bump_build.py"},
+    @{Src="prompts";                  Dst="$RemoteDir/"},
     @{Src="deploy/hikari-bot.service"; Dst="$RemoteDir/hikari-bot.service"},
     @{Src="src";                      Dst="$RemoteDir/"}
 )
@@ -179,7 +180,7 @@ cd REMOTE_DIR_PLACEHOLDER
 cp -f config.prod.json config.json
 
 # ── 准备目录 ─────────────────────────────────────
-mkdir -p data/ai_memory data/admin logs
+mkdir -p data/ai_memory data/admin logs prompts
 
 # ── 安装服务文件 ─────────────────────────────────
 cp -f hikari-bot.service /etc/systemd/system/hikari-bot.service
