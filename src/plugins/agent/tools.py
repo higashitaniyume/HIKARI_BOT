@@ -17,7 +17,7 @@ from nonebot.adapters.onebot.v11 import (
     PrivateMessageEvent,
 )
 
-from src.core.config import COBALT_API, SUPER_ADMIN
+from src.core.config import COBALT_API, SEARXNG_API, SUPER_ADMIN
 from src.plugins.admin import get_whitelist
 from src.plugins.file_sender import get_file_sender
 
@@ -199,6 +199,27 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "search_web",
+            "description": (
+                "搜索网页获取实时信息。当用户问需要查资料、最新消息、实时数据、"
+                "你不知道的事实性问题时，务必先调用此工具搜索再回答。"
+                "返回 JSON 格式的搜索结果（标题、URL、摘要）。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "搜索关键词",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_time",
             "description": "获取当前时间和日期。当用户问'现在几点'、'今天几号'时调用。",
             "parameters": {"type": "object", "properties": {}},
@@ -287,6 +308,39 @@ async def _tool_send_to(
             return f"已发送到 QQ {qq}"
     except Exception as e:
         return f"❌ 发送失败: {e}"
+
+
+async def _tool_search_web(query: str) -> str:
+    """通过 SearXNG 搜索网页。"""
+    if not SEARXNG_API:
+        return "❌ 搜索服务未配置"
+
+    try:
+        import urllib.parse
+        url = f"{SEARXNG_API.rstrip('/')}/search?q={urllib.parse.quote(query)}&format=json"
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.TimeoutException:
+        return "⏱️ 搜索超时，请稍后再试"
+    except Exception as e:
+        logger.error(f"搜索失败: {e}")
+        return f"❌ 搜索失败: {e}"
+
+    results = data.get("results", [])
+    if not results:
+        return f"未找到关于「{query}」的搜索结果"
+
+    # 取前 5 条，格式化输出
+    lines = [f"搜索「{query}」的结果（共 {len(results)} 条，显示前 5 条）："]
+    for i, r in enumerate(results[:5]):
+        title = r.get("title", "无标题")
+        url = r.get("url", "")
+        snippet = (r.get("content") or r.get("snippet", ""))[:200]
+        lines.append(f"\n{i + 1}. {title}\n   {url}\n   {snippet}")
+
+    return "\n".join(lines)
 
 
 async def _tool_get_time() -> str:
@@ -557,6 +611,8 @@ async def execute_tool(
         return await _tool_send_to(
             bot, arguments.get("target", ""), arguments.get("text", ""),
             at_user=arguments.get("at_user"))
+    elif tool_name == "search_web":
+        return await _tool_search_web(arguments.get("query", ""))
     elif tool_name == "get_time":
         return await _tool_get_time()
 
