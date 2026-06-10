@@ -180,8 +180,8 @@ async def _agent_loop(
     messages.extend(history)
     messages.append({"role": "user", "content": user_msg})
 
-    # ── Function calling 循环（最多 3 轮）────────────
-    for _round in range(3):
+    # ── Function calling 循环（最多 5 轮）────────────
+    for _round in range(5):
         response = await call_ai(messages, tools=TOOLS)
         msg = response["message"]
         tool_calls = msg.get("tool_calls")
@@ -222,6 +222,11 @@ async def _agent_loop(
                 "tool_call_id": tc["id"],
                 "content": result,
             })
+
+            # 如果已经发了消息，不再继续循环
+            if func_name == "send_message":
+                await mem.append(user_id, user_msg, func_args.get("text", ""), group_id)
+                return
 
     # ── 超过最大轮数，强制生成回复 ──────────────────
     logger.warning("Agent 达到最大 function calling 轮数，强制生成回复")

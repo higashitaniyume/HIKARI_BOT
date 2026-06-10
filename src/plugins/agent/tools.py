@@ -481,7 +481,7 @@ async def _tool_search_chat_history(
 ) -> str:
     """搜索当前会话的聊天记录（仅限当前群或当前私聊，不可跨上下文）。"""
     store = get_message_store()
-    count = max(1, min(count, 30))  # 限制 1~30 条
+    count = max(1, min(count, 15))  # 限制 1~15 条
 
     # 根据上下文获取消息源
     if group_id is not None:
