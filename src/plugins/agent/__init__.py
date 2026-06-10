@@ -74,7 +74,7 @@ def _set_cooldown(user_id: int, group_id: Optional[int]) -> None:
 _GROUP_CONTEXT_COUNT = 10
 
 
-async def _build_group_context(group_id: int, current_user_id: int) -> str:
+async def _build_group_context(group_id: int, current_user_id: int, count: int = _GROUP_CONTEXT_COUNT) -> str:
     """从 message_store 读取最近消息，构建上下文和用户映射。
 
     Returns:
@@ -90,7 +90,7 @@ async def _build_group_context(group_id: int, current_user_id: int) -> str:
         return ""
 
     # 取最近 N 条
-    recent = msgs[-_GROUP_CONTEXT_COUNT:]
+    recent = msgs[-count:]
 
     # 构建 QQ→昵称 映射（去重保留最新昵称）
     name_map: dict[int, str] = {}
@@ -144,6 +144,7 @@ async def _agent_loop(
     user_id: int,
     user_msg: str,
     group_id: Optional[int],
+    context_count: int = _GROUP_CONTEXT_COUNT,
 ) -> None:
     """Agent 主循环：构建上下文 → 调用 AI → 执行工具 → 最终回复。
 
@@ -171,7 +172,7 @@ async def _agent_loop(
     # ── 群聊上下文 ──────────────────────────────────
     group_context = ""
     if group_id:
-        group_context = await _build_group_context(group_id, user_id)
+        group_context = await _build_group_context(group_id, user_id, count=context_count)
         if group_context:
             system_prompt += "\n\n" + group_context
 
@@ -275,10 +276,13 @@ async def handle_agent(bot: Bot, event: Event):
 
     pure_text = event.get_plaintext().strip()
 
-    # 群聊中只 @机器人 但没说话 → 用隐含消息让 AI 看上下文回应
+    silent_at = False  # 标记：是否只 @ 没说话
+
+    # 群聊中只 @机器人 但没说话 → 只看最近 2 条上下文，简要回应
     if not pure_text:
         if isinstance(event, GroupMessageEvent):
-            pure_text = "（用户@了你但没有说话，请根据最近的群聊上下文自然地回应）"
+            pure_text = "（你被@了，简单看看上文，回一句就行）"
+            silent_at = True
         else:
             return
 
@@ -293,7 +297,8 @@ async def handle_agent(bot: Bot, event: Event):
     _set_cooldown(user_id, group_id)
 
     try:
-        await _agent_loop(bot, event, user_id, pure_text, group_id)
+        ctx_count = 2 if silent_at else _GROUP_CONTEXT_COUNT
+        await _agent_loop(bot, event, user_id, pure_text, group_id, context_count=ctx_count)
     except Exception as e:
         logger.exception(f"Agent 处理异常: {e}")
         error_msg = "❌ 出了点问题，请稍后再试~"
