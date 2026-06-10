@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -41,6 +42,10 @@ logger = logging.getLogger("hikari.plugins.video_parser")
 
 # 最大下载文件大小（字节），超出则只发链接不下载
 MAX_DOWNLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
+
+# QQ 能上传的最大媒体文件大小（base64 编码后约增大 33%，此处为安全值）
+MAX_QQ_UPLOAD_SIZE = 8 * 1024 * 1024  # 8 MB（图片/语音）
+MAX_QQ_VIDEO_SIZE = 15 * 1024 * 1024  # 15 MB（视频）
 
 # ============================================================================
 # 支持的服务域名 → 显示名称
@@ -271,9 +276,30 @@ async def _download_and_send(
             size_mb = len(data) / (1024 * 1024)
             logger.info(f"[{service_name}] 下载完成 → {filename} ({size_mb:.1f} MB)")
 
+            # 检查大小限制
             if len(data) > MAX_DOWNLOAD_SIZE:
                 logger.warning(f"[{service_name}] 文件过大 ({size_mb:.1f} MB)，发送链接")
-                return f"📥 [{service_name}] {filename}\n文件过大 ({size_mb:.1f} MB)\n下载链接: {file_url}"
+                return (
+                    f"📥 [{service_name}] {filename}\n"
+                    f"文件过大 ({size_mb:.1f} MB)\n下载链接: {file_url}"
+                )
+
+            # QQ 上传限制：视频 ≤ 15MB，图片/语音 ≤ 8MB
+            ext = Path(filename).suffix.lower()
+            is_video = ext in {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
+            qq_limit = MAX_QQ_VIDEO_SIZE if is_video else MAX_QQ_UPLOAD_SIZE
+
+            if len(data) > qq_limit:
+                type_label = "视频" if is_video else "文件"
+                logger.warning(
+                    f"[{service_name}] {type_label}过大 ({size_mb:.1f} MB > "
+                    f"{qq_limit / 1024 / 1024:.0f} MB)，超出QQ限制，发送链接"
+                )
+                return (
+                    f"📥 [{service_name}] {filename}\n"
+                    f"{type_label}较大 ({size_mb:.1f} MB)，QQ无法直接发送\n"
+                    f"下载链接: {file_url}"
+                )
 
             sender = get_media_sender()
             await sender.send_bytes(bot, target=target, data=data, filename=filename)
