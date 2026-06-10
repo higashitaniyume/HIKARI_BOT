@@ -220,6 +220,18 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_group_info",
+            "description": (
+                "获取当前群聊的成员信息。"
+                "当用户问'群里有谁'、'有多少人'、'管理员是谁'、'群主是谁'时调用。"
+                "仅在群聊场景有效。"
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_time",
             "description": "获取当前时间和日期。当用户问'现在几点'、'今天几号'时调用。",
             "parameters": {"type": "object", "properties": {}},
@@ -339,6 +351,63 @@ async def _tool_search_web(query: str) -> str:
         url = r.get("url", "")
         snippet = (r.get("content") or r.get("snippet", ""))[:200]
         lines.append(f"\n{i + 1}. {title}\n   {url}\n   {snippet}")
+
+    return "\n".join(lines)
+
+
+async def _tool_get_group_info(bot: Bot, group_id: int) -> str:
+    """获取群聊成员信息。"""
+    try:
+        members = await bot.get_group_member_list(group_id=group_id)
+    except Exception as e:
+        return f"❌ 获取群成员失败: {e}"
+
+    if not members:
+        return "未获取到群成员信息"
+
+    total = len(members)
+
+    # 分类：群主、管理员、普通成员
+    owner_list: list[dict] = []
+    admin_list: list[dict] = []
+    member_list: list[dict] = []
+
+    for m in members:
+        role = m.get("role", "member")
+        if role == "owner":
+            owner_list.append(m)
+        elif role == "admin":
+            admin_list.append(m)
+        else:
+            member_list.append(m)
+
+    lines = [f"群成员共 {total} 人"]
+
+    # 群主
+    for m in owner_list:
+        nick = m.get("card") or m.get("nickname", "?")
+        lines.append(f"\n👑 群主: {nick} (QQ {m['user_id']})")
+
+    # 管理员
+    if admin_list:
+        admins = [
+            f"  {m.get('card') or m.get('nickname', '?')} (QQ {m['user_id']})"
+            for m in admin_list
+        ]
+        lines.append(f"\n🛡 管理员 ({len(admin_list)} 人):")
+        lines.extend(admins)
+
+    # 普通成员：人少就列出来，人多就统计
+    if total <= 30:
+        if member_list:
+            members_str = [
+                f"  {m.get('card') or m.get('nickname', '?')} (QQ {m['user_id']})"
+                for m in member_list
+            ]
+            lines.append(f"\n👥 成员 ({len(member_list)} 人):")
+            lines.extend(members_str)
+    else:
+        lines.append(f"\n👥 普通成员: {len(member_list)} 人（人数较多，仅列出管理员以上）")
 
     return "\n".join(lines)
 
@@ -611,6 +680,10 @@ async def execute_tool(
         return await _tool_send_to(
             bot, arguments.get("target", ""), arguments.get("text", ""),
             at_user=arguments.get("at_user"))
+    elif tool_name == "get_group_info":
+        if group_id is None:
+            return "❌ 此功能仅在群聊中可用"
+        return await _tool_get_group_info(bot, group_id)
     elif tool_name == "search_web":
         return await _tool_search_web(arguments.get("query", ""))
     elif tool_name == "get_time":
