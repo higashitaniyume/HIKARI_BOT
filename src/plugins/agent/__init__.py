@@ -260,12 +260,17 @@ async def handle_agent(bot: Bot, event: Event):
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)):
         return
 
-    pure_text = event.get_plaintext().strip()
-    if not pure_text:
-        return
-
     user_id = event.user_id
     group_id = event.group_id if isinstance(event, GroupMessageEvent) else None
+
+    pure_text = event.get_plaintext().strip()
+
+    # 群聊中只 @机器人 但没说话 → 用隐含消息让 AI 看上下文回应
+    if not pure_text:
+        if isinstance(event, GroupMessageEvent):
+            pure_text = "（用户@了你但没有说话，请根据最近的群聊上下文自然地回应）"
+        else:
+            return
 
     location = f"群{group_id}" if group_id else "私聊"
     logger.info(f"[Agent] {location} {user_id}: {pure_text[:100]}")
