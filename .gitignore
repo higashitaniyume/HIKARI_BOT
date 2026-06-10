@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtualenv
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+logs/
+
+# Message data
+data/
+
+# Env (contains tokens)
+.env
+.env.prod
