@@ -42,6 +42,18 @@ log_level_map = {
 }
 setup_logging(level=log_level_map.get(NONEBOT_LOG_LEVEL.upper(), 10))
 
+# ── 启动日志 ─────────────────────────────────────────────────────────
+import logging
+_startup_logger = logging.getLogger("hikari.boot")
+_startup_logger.info("配置: ENVIRONMENT=%s  HIKARI_CONFIG_PATH=%s",
+                     os.getenv("ENVIRONMENT", "(default)"),
+                     os.getenv("HIKARI_CONFIG_PATH", "config.json"))
+_startup_logger.info("驱动: %s  WS: %s  LogLevel: %s",
+                     NONEBOT_DRIVER, NONEBOT_WS_URLS, NONEBOT_LOG_LEVEL)
+from src.core.config import DEEPSEEK_API_KEY, DEEPSEEK_MODEL, get_version
+_startup_logger.info("AI模型: %s  API: %s", DEEPSEEK_MODEL, "已配置" if DEEPSEEK_API_KEY else "未配置")
+_startup_logger.info("版本: %s", get_version())
+
 import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
