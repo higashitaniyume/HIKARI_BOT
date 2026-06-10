@@ -17,7 +17,7 @@ from nonebot.adapters.onebot.v11 import (
     PrivateMessageEvent,
 )
 
-from src.core.config import COBALT_API, SEARXNG_API, SUPER_ADMIN
+from src.core.config import COBALT_API, DEEPSEEK_API_KEY, SEARXNG_API, SUPER_ADMIN
 from src.core.message_store import get_message_store
 from src.plugins.admin import get_whitelist
 from src.plugins.file_sender import get_file_sender
@@ -258,6 +258,16 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "check_balance",
+            "description": (
+                "查询 DeepSeek API 账户余额。当用户问'还剩多少钱'、'API余额'、'账户余额'时调用。"
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_time",
             "description": "获取当前时间和日期。当用户问'现在几点'、'今天几号'时调用。",
             "parameters": {"type": "object", "properties": {}},
@@ -491,6 +501,43 @@ async def _tool_search_chat_history(
         lines.append(f"  [{t}] {nick}(QQ{uid}): {msg}")
 
     return "\n".join(lines)
+
+
+async def _tool_check_balance() -> str:
+    """查询 DeepSeek API 账户余额。"""
+    if not DEEPSEEK_API_KEY:
+        return "❌ API Key 未配置"
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                "https://api.deepseek.com/user/balance",
+                headers={
+                    "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                    "Accept": "application/json",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.TimeoutException:
+        return "⏱️ 查询超时"
+    except Exception as e:
+        return f"❌ 查询失败: {e}"
+
+    # DeepSeek balance API 返回格式:
+    # {"is_available": true, "balance_infos": [{"currency": "CNY", "total_balance": "...", ...}]}
+    if data.get("is_available"):
+        infos = data.get("balance_infos", [])
+        if infos:
+            parts = []
+            for info in infos:
+                currency = info.get("currency", "?")
+                total = info.get("total_balance", "?")
+                used = info.get("topped_up_balance", "?")
+                parts.append(f"{total} {currency}")
+            return f"✅ DeepSeek 余额: {', '.join(parts)}"
+        return "✅ API 可用，但未获取到余额明细"
+    return f"⚠️ API 状态: {data}"
 
 
 async def _tool_get_time() -> str:
@@ -773,6 +820,8 @@ async def execute_tool(
         )
     elif tool_name == "search_web":
         return await _tool_search_web(arguments.get("query", ""))
+    elif tool_name == "check_balance":
+        return await _tool_check_balance()
     elif tool_name == "get_time":
         return await _tool_get_time()
 
