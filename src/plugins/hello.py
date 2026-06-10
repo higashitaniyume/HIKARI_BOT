@@ -41,13 +41,13 @@ async def handle_lifecycle(event: LifecycleMetaEvent):
             logger.error(f"发送上线通知失败: {e}")
 
         # ── 测试图片（委托给媒体模块） ────────────────
-        if AUTO_IMAGE_PATH:
-            try:
-                sender = get_media_sender()
-                await sender.send_image(bot, target=TARGET_QQ, file_path=AUTO_IMAGE_PATH)
-            except FileNotFoundError:
-                logger.warning(f"测试图片不存在，跳过: {AUTO_IMAGE_PATH}")
-            except Exception as e:
-                logger.error(f"发送测试图片失败: {e}")
+        # if AUTO_IMAGE_PATH:
+            # try:
+            #     sender = get_media_sender()
+            #     await sender.send_image(bot, target=TARGET_QQ, file_path=AUTO_IMAGE_PATH)
+            # except FileNotFoundError:
+            #     logger.warning(f"测试图片不存在，跳过: {AUTO_IMAGE_PATH}")
+            # except Exception as e:
+            #     logger.error(f"发送测试图片失败: {e}")
 
         _sent = True

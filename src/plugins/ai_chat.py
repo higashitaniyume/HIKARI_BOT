@@ -296,37 +296,26 @@ async def handle_chat(bot: Bot, event: Event, args: Message = CommandArg()):
 
 
 # ============================================================================
-# 群内 @机器人 触发
+# 群内 @机器人 / 私聊任意消息 触发
 # ============================================================================
 
-at_chat = on_command(
-    "",  # 空命令名，匹配所有命令前缀的 @消息
-    rule=to_me() & WHITELIST,
-    priority=90,
-    block=False,
-)
-
-
-# 实际上 NoneBot2 的 on_command("") 不支持 to_me 下很好工作
-# 改用 on_message + to_me rule 组合
 from nonebot import on_message
 
-at_handler = on_message(rule=to_me() & WHITELIST, priority=90, block=False)
+# ── 群内 @机器人 ─────────────────────────────────────────
+
+group_at_handler = on_message(rule=to_me() & WHITELIST, priority=90, block=False)
 
 
-@at_handler.handle()
-async def handle_at_mention(bot: Bot, event: Event):
+@group_at_handler.handle()
+async def handle_group_at(bot: Bot, event: Event):
     """处理群内 @机器人 的消息。"""
-    # 只处理群消息（私聊由 /chat 命令处理）
     if not isinstance(event, GroupMessageEvent):
         return
 
-    # 跳过带命令前缀的消息（让其他命令处理器接管）
     text = str(event.message).strip()
     if not text:
         return
 
-    # 提取纯文本（去除 @CQ 码）
     pure_text = event.get_plaintext().strip()
     if not pure_text:
         return
@@ -338,7 +327,6 @@ async def handle_at_mention(bot: Bot, event: Event):
 
     try:
         reply = await _do_chat(user_id, pure_text, group_id)
-        # @ 回复
         at_seg = MessageSegment.at(user_id)
         await bot.send_group_msg(
             group_id=group_id,
@@ -346,6 +334,35 @@ async def handle_at_mention(bot: Bot, event: Event):
         )
     except Exception as e:
         logger.error(f"@AI 回复失败: {e}")
+
+
+# ── 私聊任意消息（带鉴权）─────────────────────────────────
+
+private_handler = on_message(
+    rule=WHITELIST,
+    priority=95,
+    block=False,
+)
+
+
+@private_handler.handle()
+async def handle_private_chat(bot: Bot, event: Event):
+    """私聊中任意消息触发 AI 回复（命令优先匹配，此 handler 兜底）。"""
+    if not isinstance(event, PrivateMessageEvent):
+        return
+
+    pure_text = event.get_plaintext().strip()
+    if not pure_text:
+        return
+
+    user_id = event.user_id
+    logger.info(f"[AI 私聊] {user_id}: {pure_text[:50]}")
+
+    try:
+        reply = await _do_chat(user_id, pure_text, group_id=None)
+        await bot.send_private_msg(user_id=user_id, message=reply)
+    except Exception as e:
+        logger.error(f"私聊 AI 回复失败: {e}")
 
 
 # ============================================================================
