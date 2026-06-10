@@ -387,9 +387,18 @@ class MemoryManager:
         return []
 
     def _trim_by_tokens(self, memory: list[dict]) -> list[dict]:
-        max_tokens = max(2000, MAX_MEMORY_MESSAGES * 50)
+        # 每对对话平均 ~100 tokens，MAX_MEMORY_MESSAGES 对 ≈ 对应条数 * 100
+        max_tokens = max(4000, MAX_MEMORY_MESSAGES * 120)
         system_tokens = _estimate_tokens(get_system_prompt()) + 4
-        budget = max(200, max_tokens - system_tokens)
+        budget = max(500, max_tokens - system_tokens)
+        # 单条截断：超过 2000 字符的消息截断（避免一条超长消息占满预算）
+        trimmed: list[dict] = []
+        for msg in memory:
+            content = msg.get("content", "")
+            if isinstance(content, str) and len(content) > 2000:
+                msg = {**msg, "content": content[:2000] + "…（已截断）"}
+            trimmed.append(msg)
+        memory = trimmed
         while memory:
             if _estimate_total_tokens(memory) <= budget:
                 break
@@ -663,7 +672,7 @@ async def _tool_parse_media_url(
                                           file_path_or_url=file_url,
                                           filename=filename)
             if ok:
-                return ""  # 已发送，不需要额外文字
+                return f"✅ 已下载并发送: {filename}"
             return f"📥 {filename}\n下载链接: {file_url}"
 
         # 下载并发
@@ -680,7 +689,7 @@ async def _tool_parse_media_url(
         sender = get_media_sender()
         try:
             await sender.send_bytes(bot, target=target, data=data, filename=filename)
-            return ""  # 已发送
+            return f"✅ 已下载并发送: {filename}"
         except Exception as e:
             # 降级发链接
             return f"📥 {filename}\n下载链接: {file_url}"
@@ -716,7 +725,9 @@ async def _tool_parse_media_url(
 
         if sent == 0:
             return "❌ 所有媒体下载失败"
-        return "" if sent == len(items) else f"📥 {sent}/{len(items)} 个媒体已发送"
+        if sent == len(items):
+            return f"✅ 已下载并发送全部 {sent} 个媒体"
+        return f"📥 {sent}/{len(items)} 个媒体已发送"
 
     return f"⚠️ 未知返回状态: {status}"
 
@@ -954,8 +965,21 @@ async def _agent_loop(
     mem = _get_memory()
     history = await mem.get_memory(user_id, group_id)
 
-    # 构建初始消息
-    messages: list[dict] = [{"role": "system", "content": get_system_prompt()}]
+    # 构建初始消息（注入当前时间）
+    from datetime import datetime
+    now = datetime.now()
+    weekday = ["一", "二", "三", "四", "五", "六", "日"][now.weekday()]
+    time_hint = (
+        f"\n\n[系统信息]\n"
+        f"当前时间: {now.year}年{now.month}月{now.day}日 "
+        f"星期{weekday} {now.hour:02d}:{now.minute:02d}:{now.second:02d}\n"
+        f"当前用户QQ: {user_id}"
+    )
+    if group_id:
+        time_hint += f"\n当前群号: {group_id}"
+    system_prompt = get_system_prompt() + time_hint
+
+    messages: list[dict] = [{"role": "system", "content": system_prompt}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_msg})
 
