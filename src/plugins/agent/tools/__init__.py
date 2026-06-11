@@ -68,6 +68,7 @@ from .send_file import tool_send_media_or_file
 from .search import tool_search_web, tool_search_chat_history
 from .group_info import tool_get_group_info
 from .misc import tool_check_balance, tool_get_time
+from .profile import tool_get_user_profile
 
 # ============================================================================
 # OpenAI 工具定义（function calling）
@@ -251,6 +252,24 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "get_user_profile",
+            "description": (
+                "查询 QQ 用户的名片信息（昵称、性别、年龄、群名片、角色等）。"
+                "当用户问'看看XXX的名片'、'XXX的资料'、'查一下这个人'时调用。"
+                "user_id 为 QQ 号，在当前群聊中可获取更详细的群名片信息。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "integer", "description": "要查询的 QQ 号"},
+                },
+                "required": ["user_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_time",
             "description": "获取当前时间和日期。当用户问'现在几点'、'今天几号'时调用。",
             "parameters": {"type": "object", "properties": {}},
@@ -308,6 +327,8 @@ async def execute_tool(
         return await tool_search_web(arguments.get("query", ""))
     elif tool_name == "check_balance":
         return await tool_check_balance()
+    elif tool_name == "get_user_profile":
+        return await tool_get_user_profile(bot, arguments.get("user_id", 0), group_id=group_id)
     elif tool_name == "get_time":
         return await tool_get_time()
 
