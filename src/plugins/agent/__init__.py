@@ -136,37 +136,48 @@ def _build_time_hint(user_id: int, group_id: Optional[int]) -> str:
 
 
 async def _analyze_silent_at(bot: Bot, group_id: int) -> str:
-    """获取 @ 消息前的最近 3 条消息，让 AI 根据上下文接话。
+    """获取 @ 消息前的最近消息，让 AI 根据上下文接话。
 
-    用 get_group_msg_history 获取历史消息，返回格式化提示文本。
+    优先用 get_group_msg_history API，失败时回退到 message_store。
     """
+    texts: list[str] = []
+
+    # ── 方案 A：OneBot API ──────────────────────────
     try:
         msgs = await bot.get_group_msg_history(
             group_id=group_id, count=_SILENT_CONTEXT_FETCH + 1,
         )
+        logger.debug(f"get_group_msg_history 返回 {len(msgs)} 条")
+        # msgs[0] = @机器人的那条，msgs[1..] = 前面的
+        for m in msgs[1:]:
+            if hasattr(m, "message"):
+                t = str(m.message).strip()
+                if t:
+                    texts.append(t)
     except Exception as e:
-        logger.warning(f"获取群消息历史失败: {e}")
-        return "（你被@了，简单看看上文，回一句就行）"
+        logger.debug(f"get_group_msg_history 失败: {e}，回退到 message_store")
+        msgs = None
 
-    # msgs[0] = @机器人的那条，msgs[1] = 前一条，msgs[2] = 再前一条
-    if len(msgs) < 2:
+    # ── 方案 B：回退到 message_store ────────────────
+    if not texts:
+        try:
+            store = get_message_store()
+            all_msgs = await store.get_group_messages(group_id)
+            if all_msgs:
+                # 取最后 N 条（排除 @机器人 那条）
+                for m in all_msgs[-_SILENT_CONTEXT_FETCH - 1:-1]:
+                    t = str(m.get("message", "")).strip()
+                    if t:
+                        texts.append(t)
+        except Exception as e:
+            logger.warning(f"message_store 读取也失败: {e}")
+
+    # ── 无上下文 ──────────────────────────────────
+    if not texts:
         return "（你被@了，前面没有上下文，简单回应一下）"
 
-    prev_msgs = msgs[1:]  # 排除 @机器人 那条
-
-    texts: list[str] = []
-    for m in prev_msgs:
-        if hasattr(m, "message"):
-            texts.append(str(m.message).strip())
-        else:
-            texts.append("")
-
-    texts = [t for t in texts if t]
-    if not texts:
-        return "（你被@了，前面没有有效上下文，简单回应一下）"
-
-    # 只看最近 2-3 条，重点看最新一条
     context = "\n".join(f"  {t[:150]}" for t in texts)
+    logger.info(f"只@不说话上下文 ({len(texts)} 条): {texts[:2]}")
     return (
         f"（你被@了但没有说话。以下是最近 {len(texts)} 条上下文，"
         f"请优先参考最新一条消息，自然地接话：\n{context}\n）"
