@@ -174,13 +174,14 @@ async def _analyze_silent_at(bot: Bot, group_id: int) -> str:
 
     # ── 无上下文 ──────────────────────────────────
     if not texts:
-        return "（你被@了，前面没有上下文，简单回应一下）"
+        return "（你被@了但前面没人说话，打个招呼就好）"
 
     context = "\n".join(f"  {t[:150]}" for t in texts)
     logger.info(f"只@不说话上下文 ({len(texts)} 条): {texts[:2]}")
     return (
-        f"（你被@了但没有说话。以下是最近 {len(texts)} 条上下文，"
-        f"请优先参考最新一条消息，自然地接话：\n{context}\n）"
+        f"你被@了。以下是@你之前的群聊消息：\n"
+        f"{context}\n\n"
+        f"请根据上面这些消息自然地接一句话，简短一点，不要提'被@了'这件事。"
     )
 
 
