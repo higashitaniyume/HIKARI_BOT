@@ -283,7 +283,7 @@ _STATIC_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "check_balance",
-            "description": "查询 DeepSeek API 账户余额。当用户问'还剩多少钱'、'API余额'、'账户余额'时调用。",
+            "description": "查询 DeepSeek 和硅基流动(SiliconFlow) API 账户余额。当用户问'还剩多少钱'、'API余额'、'账户余额'时调用。",
             "parameters": {"type": "object", "properties": {}},
         },
     },
