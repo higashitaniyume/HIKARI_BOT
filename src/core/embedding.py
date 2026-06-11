@@ -21,36 +21,14 @@ import httpx
 logger = logging.getLogger("hikari.core.embedding")
 
 # ============================================================================
-# 配置
+# 配置（统一从 config 模块读取，不再直接读 config.json）
 # ============================================================================
 
-_CONFIG_CACHE: dict = {}
-
-
-def _load_config() -> dict:
-    global _CONFIG_CACHE
-    if _CONFIG_CACHE:
-        return _CONFIG_CACHE
-    try:
-        from src.core.config import _ROOT
-        p = _ROOT / "config.json"
-        if p.exists():
-            raw = json.loads(p.read_text(encoding="utf-8"))
-            _CONFIG_CACHE = raw.get("embedding", {})
-    except Exception:
-        pass
-    if not _CONFIG_CACHE:
-        _CONFIG_CACHE = {}
-    return _CONFIG_CACHE
+from src.core.config import EMBEDDING_API_URL, EMBEDDING_API_KEY, EMBEDDING_MODEL
 
 
 def _get_config() -> tuple[str, str, str]:
-    cfg = _load_config()
-    return (
-        cfg.get("api_url", "https://api.siliconflow.cn/v1/embeddings"),
-        cfg.get("api_key", ""),
-        cfg.get("model", "Qwen/Qwen3-Embedding-8B"),
-    )
+    return (EMBEDDING_API_URL, EMBEDDING_API_KEY, EMBEDDING_MODEL)
 
 
 # ============================================================================

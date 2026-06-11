@@ -111,13 +111,15 @@ class WhitelistManager:
             logger.debug("白名单文件已变更，自动重载")
 
     def _load(self) -> None:
-        """从文件加载白名单。"""
-        self._data = self._read_json()
-        self._data.setdefault("users", [])
-        self._data.setdefault("groups", [])
+        """从文件加载白名单（原子赋值，避免并发读取看到半成品数据）。"""
+        data = self._read_json()
+        data.setdefault("users", [])
+        data.setdefault("groups", [])
         # 确保超级管理员始终在列表中
-        if SUPER_ADMIN not in self._data["users"]:
-            self._data["users"].append(SUPER_ADMIN)
+        if SUPER_ADMIN not in data["users"]:
+            data["users"].append(SUPER_ADMIN)
+        # 原子赋值：构建好完整 dict 后再替换
+        self._data = data
         try:
             self._last_mtime = os.path.getmtime(self._file_path)
         except OSError:

@@ -342,14 +342,14 @@ _ALLOWED_SEND_DIRS: list[Path] = []
 
 
 def _get_allowed_send_dirs() -> list[Path]:
-    """惰性初始化允许的目录列表。"""
+    """惰性初始化允许的目录列表（resolve 以防御符号链接穿越）。"""
     global _ALLOWED_SEND_DIRS
     if not _ALLOWED_SEND_DIRS:
-        root = Path(__file__).resolve().parent.parent.parent.parent
+        root = Path(__file__).resolve().parent.parent.parent.parent.resolve()
         _ALLOWED_SEND_DIRS = [
             root,
-            root / "downloads",
-            root / "data",
+            (root / "downloads").resolve() if (root / "downloads").exists() else root / "downloads",
+            (root / "data").resolve() if (root / "data").exists() else root / "data",
         ]
     return _ALLOWED_SEND_DIRS
 
@@ -381,50 +381,6 @@ def _validate_file_path(file_str: str) -> tuple[bool, Path | None, str]:
             continue
 
     return False, path, f"安全限制：不允许访问该路径。请将文件放到项目目录下。"
-
-
-async def _handle_media(
-    bot: Bot,
-    args: Message,
-    media_type: str,
-) -> None:
-    """统一处理媒体命令。"""
-    sender = get_media_sender()
-    send_func = {
-        "image": sender.send_image,
-        "video": sender.send_video,
-        "voice": sender.send_voice,
-    }[media_type]
-    label = {"image": "图片", "video": "视频", "voice": "语音"}[media_type]
-
-    text = str(args).strip()
-    if not text:
-        await on_command(media_type).finish(
-            f"用法: /send{media_type} <文件路径> <QQ号|group:群号>"
-        )
-
-    parts = text.rsplit(maxsplit=1)
-    if len(parts) < 2:
-        await on_command(media_type).finish(
-            f"缺少目标参数\n用法: /send{media_type} <文件路径> <QQ号|group:群号>"
-        )
-
-    file_str = parts[0].strip().strip('"').strip("'")
-    target_str = parts[1].strip()
-
-    safe, path, err = _validate_file_path(file_str)
-    if not safe:
-        logger.warning(f"拒绝不安全路径: {file_str} — {err}")
-        return
-
-    if path is None or not path.exists():
-        logger.warning(f"{label}文件不存在: {file_str}")
-        return
-
-    try:
-        await send_func(bot, target=target_str, file_path=path)
-    except Exception as e:
-        logger.error(f"发送{label}失败: {e}")
 
 
 # ── 图片命令 ──────────────────────────────────────────────

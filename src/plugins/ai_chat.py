@@ -1,27 +1,17 @@
-"""AI 聊天模块 —— 接入 DeepSeek API，支持群内每人独立记忆。
+"""AI 聊天模块（遗留） —— 接入 DeepSeek API，支持群内每人独立记忆。
+
+⚠️ 本模块与 agent 插件（src/plugins/agent/）存在功能重叠：
+   - agent 插件（priority=3, block=True）会拦截所有消息，本模块的
+     group_at_handler（priority=90）和 private_handler（priority=95）不会再触发。
+   - /chat、/clearmemory、/memory 命令仍可通过 on_command 正常使用。
+   - 本模块的记忆系统（data/ai_memory/）与 agent 的记忆系统（agent/memory.py）
+     使用不同目录，不可互换。
 
 触发方式：
     /chat <消息>    — 显式命令（私聊 + 群聊）
-    群内 @机器人     — 触发 AI 回复
+    群内 @机器人     — 触发 AI 回复（agent 插件有效时由 agent 接管）
     /clearmemory     — 清除当前用户记忆（私聊）
     /memory          — 查看记忆条数（私聊）
-
-记忆结构：
-    data/ai_memory/
-    ├── private/{user_id}.json
-    └── group/{group_id}/{user_id}.json
-
-每条记忆是 OpenAI 格式的 {"role": "user/assistant", "content": "..."}
-系统提示词由 config 注入，不存储在记忆文件中。
-
-优化要点：
-    - Per-user 异步锁（不同用户不互相阻塞）
-    - 内存缓存（60s TTL，减少磁盘 I/O）
-    - 基于 token 数的智能裁剪（而非固定条数）
-    - 频率限制（同一用户/上下文 5s 冷却）
-    - API 并发上限（最多 3 个同时请求）
-    - 自动重试（429/5xx/超时，指数退避）
-    - 错误信息脱敏（用户侧不暴露内部细节）
 """
 
 from __future__ import annotations
@@ -60,6 +50,17 @@ from src.plugins.admin import WHITELIST
 from src.plugins.video_parser import has_media_url
 
 logger = logging.getLogger("hikari.plugins.ai_chat")
+
+# ============================================================================
+# CQ 码过滤（防止 prompt injection 输出任意 OneBot 消息段）
+# ============================================================================
+
+_CQ_CODE_RE = re.compile(r"\[CQ:[a-zA-Z]+,[^\]]*\]")
+
+
+def _sanitize_reply(text: str) -> str:
+    """去除 AI 输出中的所有 [CQ:*] 码。"""
+    return _CQ_CODE_RE.sub("", text).strip()
 
 # ============================================================================
 # 常量
@@ -471,6 +472,7 @@ async def _do_chat(
 
     # 调用 AI
     reply = await _call_ai(messages)
+    reply = _sanitize_reply(reply)
 
     # 更新记忆
     await mem.append(user_id, message, reply, group_id)

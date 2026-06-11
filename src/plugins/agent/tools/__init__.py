@@ -29,29 +29,60 @@ logger = logging.getLogger("hikari.plugins.agent")
 MAX_DOWNLOAD_SIZE = 100 * 1024 * 1024
 MAX_QQ_UPLOAD_SIZE = 8 * 1024 * 1024
 MAX_QQ_VIDEO_SIZE = 15 * 1024 * 1024
-_SAFE_QQ = 3433559280
+
+from src.core.config import SUPER_ADMIN as _SAFE_QQ
 
 # ============================================================================
-# 错误拦截
+# CQ 码过滤（防止 prompt injection 注入任意 OneBot 消息段）
 # ============================================================================
 
-_ERROR_PATTERNS = [
-    "Traceback", "AttributeError", "TypeError", "KeyError", "ValueError",
-    "ImportError", "ModuleNotFoundError", "ConnectionError", "TimeoutError",
-    "HTTPStatusError", "NoneType", "object has no attribute",
-    "missing required", "Network is unreachable", "Connection refused",
-    "timed out", "❌", "⏱️",
+_CQ_RE = re.compile(r"\[CQ:[a-zA-Z]+,[^\]]*\]")
+
+
+def sanitize_cq_code(text: str) -> str:
+    """去除文本中所有 [CQ:*] 码，防止 prompt injection 注入消息段。"""
+    return _CQ_RE.sub("", text).strip()
+
+
+# ============================================================================
+# 错误拦截（使用精确正则，避免正常对话词汇被误杀）
+# ============================================================================
+
+import re as _re
+
+_ERROR_RES = [
+    # 明确的异常堆栈 / traceback
+    _re.compile(r"Traceback\s*\(most recent call last\)", _re.IGNORECASE),
+    _re.compile(r'File\s+".+?",\s*line\s+\d+'),
+    _re.compile(r"^\s*(Attribute|Type|Key|Value|Import|ModuleNotFound|Connection|Timeout|HTTPStatus)Error\b", _re.MULTILINE | _re.IGNORECASE),
+    # 属性错误描述
+    _re.compile(r"'[^']*'\s*object\s+has\s+no\s+attribute", _re.IGNORECASE),
+    # 参数缺失
+    _re.compile(r"missing\s+\d+\s+required", _re.IGNORECASE),
+    # 网络不可达
+    _re.compile(r"Network\s+is\s+unreachable", _re.IGNORECASE),
+    _re.compile(r"Connection\s+refused", _re.IGNORECASE),
+    # 工具输出的错误符号（出现在行首）
+    _re.compile(r"^\s*[❌⏱️⚠️]", _re.MULTILINE),
+    # NoneType 错误
+    _re.compile(r"'NoneType'\s+object", _re.IGNORECASE),
 ]
 
 
 def _filter_error(text: str, target_user_id: int) -> str:
+    """对非超级管理员用户，过滤 AI 输出中的错误/异常信息 + CQ 码。"""
     if target_user_id == _SAFE_QQ or not text:
         return text
-    tl = text.lower()
-    for pat in _ERROR_PATTERNS:
-        if pat.lower() in tl:
+
+    # 先去除 CQ 码
+    text = sanitize_cq_code(text)
+
+    # 检查是否匹配错误模式
+    for pat in _ERROR_RES:
+        if pat.search(text):
             logger.warning(f"拦截错误输出 → QQ{target_user_id}，原文前60字: {text[:60]}")
             return "出了点小事故喵，taffy脑子有点乱，等一下再试试~"
+
     return text
 
 

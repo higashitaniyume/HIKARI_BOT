@@ -209,6 +209,16 @@ async def _call_cobalt(media_url: str) -> dict:
             f"(耗时 {elapsed:.2f}s, body {len(response.content)} bytes)"
         )
 
+        # 验证 Content-Type，防止解析非 JSON 响应
+        content_type = response.headers.get("Content-Type", "")
+        if "application/json" not in content_type:
+            logger.error(
+                f"Cobalt 返回非 JSON Content-Type: {content_type} — "
+                f"{response.text[:300]}"
+            )
+            response.raise_for_status()
+            raise ValueError(f"意外的 Content-Type: {content_type}")
+
         # cobalt 会用 HTTP 400 返回 JSON 错误详情，所以不要直接 raise_for_status。
         try:
             result = response.json()

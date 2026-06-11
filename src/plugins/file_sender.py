@@ -123,8 +123,8 @@ def _validate_local_path(file_str: str) -> tuple[bool, Path | None, str]:
         path = Path(file_str).resolve()
     except (OSError, ValueError) as e:
         return False, None, f"路径解析失败: {e}"
-    # 允许项目根目录及其子目录
-    root = Path(__file__).resolve().parent.parent.parent.parent
+    # 允许项目根目录及其子目录（resolve 双方以防御符号链接穿越）
+    root = Path(__file__).resolve().parent.parent.parent.parent.resolve()
     try:
         path.relative_to(root)
         return True, path, ""

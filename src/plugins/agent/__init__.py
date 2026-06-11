@@ -26,7 +26,7 @@ from nonebot.adapters.onebot.v11 import (
 )
 from nonebot.rule import Rule
 
-from src.core.config import get_system_prompt
+from src.core.config import get_system_prompt, SUPER_ADMIN
 from src.core.message_store import get_message_store
 from src.plugins.admin import get_whitelist
 
@@ -44,34 +44,35 @@ _MIN_CHAT_INTERVAL = 5.0          # 频率限制（秒）
 _GROUP_CONTEXT_COUNT = 10         # 正常 @ 时的上下文条数
 _SILENT_CONTEXT_FETCH = 3         # 只 @ 不说话时获取的历史消息条数
 
-# 错误模式：匹配非自然语言的报错/异常/traceback
+# 错误模式：匹配非自然语言的报错/异常/traceback + CQ 码
 import re as _re
+_CQ_RE = _re.compile(r"\[CQ:[a-zA-Z]+,[^\]]*\]")
 _ERROR_PATTERNS = [
-    _re.compile(r"❌|⏱️|⚠️"),
-    _re.compile(r"Traceback|File \".+?\", line \d+|AttributeError|TypeError|KeyError|ValueError|ImportError|ModuleNotFoundError|ConnectionError|TimeoutError|HTTPStatusError|NoneType", _re.IGNORECASE),
-    _re.compile(r"'[^']*' object has no attribute|missing \d+ required|Network is unreachable|Connection refused|timed out", _re.IGNORECASE),
-    _re.compile(r"❌\s*AI|❌\s*API|API调用|解析失败|下载失败|搜索失败|发送失败|查询失败", _re.IGNORECASE),
+    _re.compile(r"Traceback\s*\(most recent call last\)", _re.IGNORECASE),
+    _re.compile(r'File\s+".+?",\s*line\s+\d+'),
+    _re.compile(r"^\s*(Attribute|Type|Key|Value|Import|ModuleNotFound|Connection|Timeout|HTTPStatus)Error\b", _re.MULTILINE | _re.IGNORECASE),
+    _re.compile(r"'[^']*'\s*object\s+has\s+no\s+attribute", _re.IGNORECASE),
+    _re.compile(r"missing\s+\d+\s+required", _re.IGNORECASE),
+    _re.compile(r"Network\s+is\s+unreachable", _re.IGNORECASE),
+    _re.compile(r"Connection\s+refused", _re.IGNORECASE),
+    _re.compile(r"^\s*[❌⏱️⚠️]", _re.MULTILINE),
+    _re.compile(r"'NoneType'\s+object", _re.IGNORECASE),
 ]
-
-# 超级管理员 QQ（硬编码兜底）
-_SAFE_QQ = 3433559280
 
 
 def _filter_outgoing(text: str, target_user_id: int) -> str:
-    """拦截非自然语言的错误消息，非超级管理员只看到友好提示。"""
-    if target_user_id == _SAFE_QQ or not text:
+    """拦截非自然语言的错误消息 + CQ 码；非超级管理员只看到友好提示。"""
+    if target_user_id == SUPER_ADMIN or not text:
         return text
 
+    # 去除 CQ 码（防止 prompt injection 注入任意 OneBot 消息段）
+    text = _CQ_RE.sub("", text).strip()
+
     # 检查是否匹配错误模式
-    is_error = False
     for pat in _ERROR_PATTERNS:
         if pat.search(text):
-            is_error = True
-            break
-
-    if is_error:
-        logger.warning(f"拦截错误输出 → 用户{target_user_id}，原文前80字: {text[:80]}")
-        return "出了点小事故喵，taffy脑子有点乱，等一下再试试~"
+            logger.warning(f"拦截错误输出 → 用户{target_user_id}，原文前80字: {text[:80]}")
+            return "出了点小事故喵，taffy脑子有点乱，等一下再试试~"
 
     return text
 

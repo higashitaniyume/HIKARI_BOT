@@ -16,9 +16,9 @@ _ALLOWED_DIRS: list[Path] = []
 def _get_allowed_dirs() -> list[Path]:
     global _ALLOWED_DIRS
     if not _ALLOWED_DIRS:
-        root = Path(__file__).resolve().parent.parent.parent.parent.parent
+        root = Path(__file__).resolve().parent.parent.parent.parent.parent.resolve()
         candidates = [root / "downloads", root / "data" / "media", root / "data" / "files"]
-        _ALLOWED_DIRS = [d for d in candidates if d.exists()]
+        _ALLOWED_DIRS = [d.resolve() if d.exists() else d for d in candidates]
         if not _ALLOWED_DIRS:
             (root / "downloads").mkdir(parents=True, exist_ok=True)
             _ALLOWED_DIRS = [root / "downloads"]
@@ -32,7 +32,7 @@ def _resolve_safe_path(user_path: str) -> Optional[Path]:
         raw = Path(user_path)
         if ".." in user_path.replace("\\", "/").split("/"):
             return None
-        root = Path(__file__).resolve().parent.parent.parent.parent.parent
+        root = Path(__file__).resolve().parent.parent.parent.parent.parent.resolve()
         resolved = (root / raw).resolve() if not raw.is_absolute() else raw.resolve()
         for allowed in _get_allowed_dirs():
             try:
@@ -64,6 +64,16 @@ async def tool_send_media_or_file(bot: Bot, path_or_url: str, target: str) -> st
 
     if not resolved.exists():
         return f"❌ 文件不存在: {path_or_url}"
+
+    # 拒绝过大文件（避免内存耗尽）
+    MAX_BYTES_SEND = 50 * 1024 * 1024  # 50 MB
+    try:
+        fsize = resolved.stat().st_size
+        if fsize > MAX_BYTES_SEND:
+            size_mb = fsize / (1024 * 1024)
+            return f"❌ 文件过大 ({size_mb:.1f} MB)，请改用 /sendfile 命令"
+    except OSError as e:
+        return f"❌ 无法读取文件信息: {e}"
 
     sender = get_media_sender()
     try:

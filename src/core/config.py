@@ -89,16 +89,26 @@ PROMPT_FILE: str = _get("prompt.file", "prompts/hikari.txt")
 # 兜底系统提示词（prompt 文件不存在时使用）
 _FALLBACK_SYSTEM_PROMPT = "你是一个可爱的QQ机器人，名叫HIKARI。请用中文回复，语气活泼可爱。"
 
+# prompt 文件内容缓存（mtime → content），避免每次 AI 调用都读磁盘
+_prompt_cache: tuple[float, str] | None = None
+
 
 def get_system_prompt() -> str:
     """读取系统提示词（从 prompt 文件读取，支持 UTF-8 编码的 .txt/.md 文件）。
 
     若文件不存在则返回兜底提示词。
+    有 mtime 缓存：prompt 文件未变时直接返回缓存内容。
     """
+    global _prompt_cache
     prompt_path = _ROOT / PROMPT_FILE
     try:
         if prompt_path.exists():
-            return prompt_path.read_text(encoding="utf-8").strip()
+            mtime = prompt_path.stat().st_mtime
+            if _prompt_cache is not None and _prompt_cache[0] == mtime:
+                return _prompt_cache[1]
+            content = prompt_path.read_text(encoding="utf-8").strip()
+            _prompt_cache = (mtime, content)
+            return content
     except (OSError, UnicodeDecodeError) as e:
         logger.warning(f"无法读取系统提示词文件 {prompt_path}: {e}")
     logger.warning(f"系统提示词文件不存在: {prompt_path}，使用兜底提示词")
@@ -128,6 +138,14 @@ COBALT_API: str = _get("cobalt.api", "http://127.0.0.1:9000/")
 # ============================================================================
 
 SEARXNG_API: str = _get("searxng.api", "http://127.0.0.1:54259/")
+
+# ============================================================================
+# Embedding 嵌入模型
+# ============================================================================
+
+EMBEDDING_API_URL: str = _get("embedding.api_url", "https://api.siliconflow.cn/v1/embeddings")
+EMBEDDING_API_KEY: str = _get("embedding.api_key", "")
+EMBEDDING_MODEL: str = _get("embedding.model", "Qwen/Qwen3-Embedding-8B")
 
 # ============================================================================
 # 版本信息（version.json）

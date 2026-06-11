@@ -36,9 +36,15 @@ async def tool_search_web(query: str) -> str:
     try:
         import urllib.parse
         url = f"{SEARXNG_API.rstrip('/')}/search?q={urllib.parse.quote(query)}&format=json"
-        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+        # 限制响应体大小，防止超大响应耗尽内存
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False,
+                                      limits=httpx.Limits(max_keepalive_connections=1)) as client:
             resp = await client.get(url)
             resp.raise_for_status()
+            # 检查响应大小
+            content_length = resp.headers.get("Content-Length")
+            if content_length and int(content_length) > 10 * 1024 * 1024:  # 10 MB
+                return "❌ 搜索结果过大，请缩小搜索范围"
             data = resp.json()
     except httpx.TimeoutException:
         return "⏱️ 搜索超时，请稍后再试"
