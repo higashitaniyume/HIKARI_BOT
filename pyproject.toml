@@ -10,7 +10,6 @@ dependencies = [
     "nonebot-plugin-docs>=2.5.0",
     "nonebot-plugin-sentry>=2.0.0",
     "openai>=1.0.0",
-    "sentence-transformers>=5.5.1",
 ]
 
 [tool.nonebot]

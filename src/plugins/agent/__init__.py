@@ -43,8 +43,6 @@ logger = logging.getLogger("hikari.plugins.agent")
 _MIN_CHAT_INTERVAL = 5.0          # 频率限制（秒）
 _GROUP_CONTEXT_COUNT = 10         # 正常 @ 时的上下文条数
 _SILENT_CONTEXT_FETCH = 3         # 只 @ 不说话时获取的历史消息条数
-_IDLE_MINUTES = 10                # 空闲多少分钟算对话结束
-_TOPIC_CHANGE_THRESHOLD = 0.3     # 语义相似度阈值（低于此值 = 话题切换）
 
 # ============================================================================
 # 频率限制
@@ -138,10 +136,9 @@ def _build_time_hint(user_id: int, group_id: Optional[int]) -> str:
 
 
 async def _analyze_silent_at(bot: Bot, group_id: int) -> str:
-    """获取 @ 消息前的最近消息，判断话题是否切换。
+    """获取 @ 消息前的最近 3 条消息，让 AI 根据上下文接话。
 
-    使用 get_group_msg_history 获取最近 {_SILENT_CONTEXT_FETCH}+1 条消息，
-    用嵌入模型检测话题连续性，返回给 AI 的提示文本。
+    用 get_group_msg_history 获取历史消息，返回格式化提示文本。
     """
     try:
         msgs = await bot.get_group_msg_history(
@@ -157,7 +154,6 @@ async def _analyze_silent_at(bot: Bot, group_id: int) -> str:
 
     prev_msgs = msgs[1:]  # 排除 @机器人 那条
 
-    # 提取消息文本
     texts: list[str] = []
     for m in prev_msgs:
         if hasattr(m, "message"):
@@ -169,30 +165,11 @@ async def _analyze_silent_at(bot: Bot, group_id: int) -> str:
     if not texts:
         return "（你被@了，前面没有有效上下文，简单回应一下）"
 
-    # 用嵌入模型检测最新两条的语义相似度
-    if len(texts) >= 2:
-        try:
-            from src.core.embedding import get_embedding
-            emb = get_embedding()
-            vecs = await emb.encode_batch(texts[:2])
-            sim = sum(a * b for a, b in zip(vecs[0], vecs[1]))
-        except Exception as e:
-            logger.warning(f"嵌入相似度计算失败: {e}")
-            sim = 0.5  # 兜底：当作连续话题
-
-        if sim < _TOPIC_CHANGE_THRESHOLD:
-            # 话题完全变了 → 只看最新一条
-            context = "\n".join(f"  {t[:100]}" for t in texts[:1])
-            return (
-                f"（你被@了。上文的最新一条消息话题与之前完全不同（相似度{sim:.1f}），"
-                f"请只关注这一条消息，简单回应：\n{context}\n）"
-            )
-
-    # 话题连续 → 看全部
-    context = "\n".join(f"  {t[:100]}" for t in texts)
+    # 只看最近 2-3 条，重点看最新一条
+    context = "\n".join(f"  {t[:150]}" for t in texts)
     return (
-        f"（你被@了但没有说话。以下是@{_SILENT_CONTEXT_FETCH}条上下文，"
-        f"请自然地接话，简短回应：\n{context}\n）"
+        f"（你被@了但没有说话。以下是最近 {len(texts)} 条上下文，"
+        f"请优先参考最新一条消息，自然地接话：\n{context}\n）"
     )
 
 
