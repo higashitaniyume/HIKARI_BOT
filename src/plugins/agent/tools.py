@@ -18,6 +18,7 @@ from nonebot.adapters.onebot.v11 import (
 )
 
 from src.core.config import COBALT_API, DEEPSEEK_API_KEY, SEARXNG_API, SUPER_ADMIN
+from src.core.embedding import get_vector_store
 from src.core.message_store import get_message_store
 from src.plugins.admin import get_whitelist
 from src.plugins.file_sender import get_file_sender
@@ -263,6 +264,32 @@ TOOLS: list[dict[str, Any]] = [
                 "查询 DeepSeek API 账户余额。当用户问'还剩多少钱'、'API余额'、'账户余额'时调用。"
             ),
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_semantic",
+            "description": (
+                "语义搜索聊天记录——按含义找消息，不需要精确关键词。"
+                "当用户用模糊描述想找之前聊过的内容时使用，例如："
+                "'之前聊的那个黄色的电老鼠'、'上次讨论的服务器问题'。"
+                "与 search_chat_history（精确关键词）互补。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "要搜索的内容描述（自然语言）",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "返回条数，默认 5",
+                    },
+                },
+                "required": ["query"],
+            },
         },
     },
     {
@@ -565,6 +592,35 @@ async def _tool_check_balance() -> str:
             return f"✅ DeepSeek 余额: {', '.join(parts)}"
         return "✅ API 可用，但未获取到余额明细"
     return f"⚠️ API 状态: {data}"
+
+
+async def _tool_search_semantic(
+    group_id: int | None, user_id: int, query: str, top_k: int = 5,
+) -> str:
+    """语义搜索聊天记录。"""
+    top_k = max(1, min(top_k, 15))
+    store = get_vector_store()
+
+    try:
+        results = await store.search(group_id, user_id, query, top_k=top_k)
+    except Exception as e:
+        logger.error(f"语义搜索失败: {e}")
+        return f"❌ 语义搜索失败: {e}"
+
+    if not results:
+        scope = f"群 {group_id}" if group_id else "私聊"
+        return f"在 {scope} 的记录中未找到与「{query}」语义相关的消息"
+
+    lines = [f"语义搜索「{query}」的结果（共 {len(results)} 条）："]
+    for i, r in enumerate(results):
+        sim = r["similarity"]
+        bar = "█" * max(1, int(sim * 10))
+        lines.append(
+            f"\n{i + 1}. [{r['time']}] {r['sender_name']}(QQ{r['sender_id']}):\n"
+            f"   {r['text'][:200]}   ({bar} 相似度 {sim})"
+        )
+
+    return "\n".join(lines)
 
 
 async def _tool_get_time() -> str:
@@ -923,6 +979,11 @@ async def execute_tool(
         )
     elif tool_name == "search_web":
         return await _tool_search_web(arguments.get("query", ""))
+    elif tool_name == "search_semantic":
+        return await _tool_search_semantic(
+            group_id, user_id, query=arguments.get("query", ""),
+            top_k=arguments.get("top_k", 5),
+        )
     elif tool_name == "check_balance":
         return await _tool_check_balance()
     elif tool_name == "get_time":
