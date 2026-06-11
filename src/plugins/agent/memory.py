@@ -354,6 +354,13 @@ class MemoryManager:
         path.write_text(combined.strip() + "\n", encoding="utf-8")
         logger.info(f"已归档到冷记忆: {path}")
 
+        # 嵌入向量（供语义回忆检索）
+        try:
+            from src.core.embedding import get_memory_vector_store
+            await get_memory_vector_store().add(user_id, group_id, summary, date_str)
+        except Exception:
+            pass
+
     async def _summarize_cold_memory(self, content: str) -> str:
         """AI 压缩过大的冷记忆。"""
         from .client import get_client
@@ -435,6 +442,13 @@ class MemoryManager:
 
         path.write_text(combined.strip() + "\n", encoding="utf-8")
         logger.info(f"已归档到群记忆: {path}")
+
+        # 嵌入向量
+        try:
+            from src.core.embedding import get_memory_vector_store
+            await get_memory_vector_store().add(0, group_id, summary, date_str, is_group_shared=True)
+        except Exception:
+            pass
 
     # ── 清除冷记忆 ────────────────────────────────────
 
