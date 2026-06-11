@@ -279,8 +279,10 @@ _STATIC_TOOLS: list[dict[str, Any]] = [
     },
 ]
 
-# 合并内置工具 + OneBot API 动态工具
-TOOLS: list[dict[str, Any]] = _STATIC_TOOLS + build_onebot_tools()
+# 合并内置工具 + OneBot API 动态工具（去重：静态工具优先）
+_static_names = {t["function"]["name"] for t in _STATIC_TOOLS}
+_onbot = [t for t in build_onebot_tools() if t["function"]["name"] not in _static_names]
+TOOLS: list[dict[str, Any]] = _STATIC_TOOLS + _onbot
 
 # ============================================================================
 # 工具执行调度
