@@ -109,7 +109,7 @@ def get_system_prompt() -> str:
 # ============================================================================
 
 MAX_MEMORY_MESSAGES: int = int(_get("ai_memory.max_messages", 40))
-AI_MEMORY_DIR: str = _get("ai_memory.dir", "data/ai_memory")
+AI_MEMORY_DIR: str = _get("ai_memory.dir", "data/memory")
 
 # ============================================================================
 # 管理员 / 白名单

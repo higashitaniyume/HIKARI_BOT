@@ -20,10 +20,7 @@ from src.core.message_store import get_message_store
 
 logger = logging.getLogger("hikari.plugins.message_collector")
 
-# 全局消息存储实例
 _store = get_message_store()
-
-# ─── 消息事件处理器 ─────────────────────────────────────────────
 
 msg_handler = on_message(priority=1, block=False)
 
@@ -34,12 +31,10 @@ async def handle_message(event: MessageEvent):
     now = datetime.now()
     timestamp = time.time()
 
-    # 提取消息文本（NoneBot Message 对象自动转字符串）
     message_text = str(event.message)
     if not message_text.strip():
-        return  # 跳过空消息
+        return
 
-    # 提取消息 ID
     message_id = getattr(event, "message_id", None)
 
     if isinstance(event, GroupMessageEvent):
@@ -47,11 +42,8 @@ async def handle_message(event: MessageEvent):
     elif isinstance(event, PrivateMessageEvent):
         await _handle_private_msg(event, now, timestamp, message_text, message_id)
     else:
-        # 兜底：其他消息类型，记录基本信息
         logger.debug(f"[其他消息] user={event.user_id} | {message_text[:50]}")
 
-
-# ─── 群消息处理 ─────────────────────────────────────────────────
 
 async def _handle_group_msg(
     event: GroupMessageEvent,
@@ -60,11 +52,10 @@ async def _handle_group_msg(
     message_text: str,
     message_id: int | None,
 ) -> None:
-    """处理并存储群消息。"""
     qq = event.user_id
     group_id = event.group_id
     nickname = event.sender.nickname or ""
-    card = event.sender.card or ""  # 群名片
+    card = event.sender.card or ""
     role = event.sender.role or "member"
 
     record = {
@@ -84,14 +75,11 @@ async def _handle_group_msg(
 
     await _store.save_group_msg(group_id, record)
 
-    # 结构化日志
     display_name = card or nickname
     logger.info(
         f"[群消息] 群{group_id} | {qq}({display_name}) | {message_text[:100]}"
     )
 
-
-# ─── 私聊消息处理 ─────────────────────────────────────────────────
 
 async def _handle_private_msg(
     event: PrivateMessageEvent,
@@ -100,7 +88,6 @@ async def _handle_private_msg(
     message_text: str,
     message_id: int | None,
 ) -> None:
-    """处理并存储私聊消息。"""
     qq = event.user_id
     nickname = event.sender.nickname or ""
 
@@ -118,7 +105,6 @@ async def _handle_private_msg(
 
     await _store.save_private_msg(qq, record)
 
-    # 结构化日志
     logger.info(
         f"[私聊消息] {qq}({nickname}) | {message_text[:100]}"
     )
