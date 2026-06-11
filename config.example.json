@@ -26,5 +26,10 @@
     },
     "searxng": {
         "api": "http://127.0.0.1:54259/"
+    },
+    "embedding": {
+        "api_url": "https://api.siliconflow.cn/v1/embeddings",
+        "api_key": "sk-your-siliconflow-key",
+        "model": "Qwen/Qwen3-Embedding-8B"
     }
 }

@@ -69,6 +69,7 @@ from .search import tool_search_web, tool_search_chat_history
 from .group_info import tool_get_group_info
 from .misc import tool_check_balance, tool_get_time
 from .profile import tool_get_user_profile
+from .semantic_search import tool_search_semantic
 from ..onebot_tools import build_onebot_tools, execute_onebot_api
 
 # ============================================================================
@@ -272,6 +273,25 @@ _STATIC_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "search_semantic",
+            "description": (
+                "语义搜索聊天记录——按含义找消息，不需要精确关键词。"
+                "当用户用模糊描述找之前聊过的内容时使用，如'之前聊的那个黄色的电老鼠'。"
+                "与 search_chat_history（精确关键词+日期）互补。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "搜索描述（自然语言）"},
+                    "top_k": {"type": "integer", "description": "返回条数，默认 5"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_time",
             "description": "获取当前时间和日期。当用户问'现在几点'、'今天几号'时调用。",
             "parameters": {"type": "object", "properties": {}},
@@ -336,6 +356,11 @@ async def execute_tool(
         return await tool_check_balance()
     elif tool_name == "get_user_profile":
         return await tool_get_user_profile(bot, arguments.get("user_id", 0), group_id=group_id)
+    elif tool_name == "search_semantic":
+        return await tool_search_semantic(
+            group_id, user_id,
+            query=arguments.get("query", ""),
+            top_k=arguments.get("top_k", 5))
     elif tool_name == "get_time":
         return await tool_get_time()
 
