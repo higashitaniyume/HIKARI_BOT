@@ -547,7 +547,7 @@ async def _tool_search_chat_history(
             messages = filtered
 
     # 关键词搜索
-    kw = keyword.strip().lower()
+    kw = (keyword or "").strip().lower()
     if kw:
         matched = []
         for m in messages:
