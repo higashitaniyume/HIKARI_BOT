@@ -2,6 +2,13 @@
 
 模型：paraphrase-multilingual-MiniLM-L12-v2（384维，中英文，~120MB）
 性能：~1.1ms/条（CPU），首次加载 ~15s
+
+首次加载需要从 HuggingFace 下载模型。国内可通过代理或镜像加速：
+    HF_ENDPOINT=https://hf-mirror.com          # 镜像
+    HTTPS_PROXY=http://127.0.0.1:7897           # 代理
+    在 config.json 的 embedding 节配置：
+        "mirror": "https://hf-mirror.com",
+        "proxy": "http://127.0.0.1:7897"
 """
 
 from __future__ import annotations
@@ -9,15 +16,35 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import os
 import time
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
 
 logger = logging.getLogger("hikari.core.embedding")
 
-# 全局单例
 _model: Optional["EmbeddingModel"] = None
+
+
+def _load_embedding_config() -> tuple[str, str]:
+    """从 config.json 读取 embedding 相关的代理/镜像配置。"""
+    mirror = ""
+    proxy = ""
+    try:
+        # 延迟导入避免循环
+        from src.core.config import _ROOT
+        config_path = _ROOT / "config.json"
+        if config_path.exists():
+            import json
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+            emb = raw.get("embedding", {})
+            mirror = emb.get("mirror", "")
+            proxy = emb.get("proxy", "")
+    except Exception:
+        pass
+    return mirror, proxy
 
 
 class EmbeddingModel:
@@ -32,6 +59,18 @@ class EmbeddingModel:
     def _ensure_loaded(self):
         if self._loaded:
             return
+
+        # ── 配置代理/镜像 ──────────────────────────
+        mirror, proxy = _load_embedding_config()
+        if mirror and "HF_ENDPOINT" not in os.environ:
+            os.environ["HF_ENDPOINT"] = mirror
+            logger.info(f"HuggingFace 镜像: {mirror}")
+        if proxy:
+            for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+                if key not in os.environ:
+                    os.environ[key] = proxy
+            logger.info(f"HuggingFace 代理: {proxy}")
+
         logger.info(f"加载嵌入模型: {self._model_name} ...")
         start = time.monotonic()
         from sentence_transformers import SentenceTransformer
