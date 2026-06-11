@@ -69,12 +69,14 @@ from .search import tool_search_web, tool_search_chat_history
 from .group_info import tool_get_group_info
 from .misc import tool_check_balance, tool_get_time
 from .profile import tool_get_user_profile
+from ..onebot_tools import build_onebot_tools, execute_onebot_api
 
 # ============================================================================
 # OpenAI 工具定义（function calling）
 # ============================================================================
 
-TOOLS: list[dict[str, Any]] = [
+# 内置工具 + OneBot API 动态工具
+_STATIC_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -277,6 +279,9 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
+# 合并内置工具 + OneBot API 动态工具
+TOOLS: list[dict[str, Any]] = _STATIC_TOOLS + build_onebot_tools()
+
 # ============================================================================
 # 工具执行调度
 # ============================================================================
@@ -331,5 +336,9 @@ async def execute_tool(
         return await tool_get_user_profile(bot, arguments.get("user_id", 0), group_id=group_id)
     elif tool_name == "get_time":
         return await tool_get_time()
+
+    # ── OneBot API 动态工具 ────────────────────────
+    elif tool_name.startswith(("get_", "send_", "set_", "delete_")):
+        return await execute_onebot_api(bot, tool_name, arguments)
 
     return f"❌ 未知工具: {tool_name}"
