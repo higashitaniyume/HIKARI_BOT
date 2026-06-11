@@ -32,17 +32,17 @@ ONEBOT_APIS: dict[str, dict] = {
     },
     "get_group_member_info": {
         "level": "read",
-        "description": "获取指定群成员的详细信息，含群名片、QQ等级、入群时间、最后发言时间等。",
+        "description": "获取指定群成员的详细信息。user_id必须是QQ号(数字)，昵称请先从群成员列表中查找。",
         "parameters": {
             "group_id": {"type": "integer", "description": "群号"},
-            "user_id": {"type": "integer", "description": "QQ 号"},
+            "user_id": {"type": "integer", "description": "QQ 号(数字)，从群成员映射查找，不要猜"},
         },
     },
     "get_stranger_info": {
         "level": "read",
-        "description": "获取陌生人/好友的QQ名片信息，含昵称、性别、年龄、QID等。私聊或跨群也能查到。",
+        "description": "获取陌生人/好友的QQ名片信息。user_id必须是QQ号(数字)，昵称请先查群成员映射。",
         "parameters": {
-            "user_id": {"type": "integer", "description": "QQ 号"},
+            "user_id": {"type": "integer", "description": "QQ 号(数字)，从群成员映射查找，不要猜"},
         },
     },
     "get_group_msg_history": {
@@ -94,18 +94,22 @@ ONEBOT_APIS: dict[str, dict] = {
     },
     "set_group_card": {
         "level": "write",
-        "description": "修改指定群成员的群名片（群昵称）。不填 card 参数则取消群名片。仅能修改机器人自己的群名片，除非是管理员。",
+        "description": "修改群成员的群名片。user_id必须是QQ号(数字)，昵称请先从群成员列表查找。不填card则清空。",
         "parameters": {
             "group_id": {"type": "integer", "description": "群号"},
-            "user_id": {"type": "integer", "description": "QQ 号"},
+            "user_id": {"type": "integer", "description": "QQ 号(数字)，从群成员映射查找，不要猜"},
             "card": {"type": "string", "description": "新的群名片，不填则清空"},
         },
     },
     "send_like": {
         "level": "write",
-        "description": "给好友点赞（发送戳一戳like通知）。",
+        "description": (
+            "给好友点赞。user_id 必须是 QQ 号(数字)。"
+            "如果用户说昵称(如'给小鱼点赞')，先查群成员映射或调用 get_group_member_list 找到对应的 QQ 号，"
+            "不要填入自己的 QQ 号。"
+        ),
         "parameters": {
-            "user_id": {"type": "integer", "description": "目标 QQ 号"},
+            "user_id": {"type": "integer", "description": "目标 QQ 号(数字)。从群成员映射中查找，不要猜。"},
             "times": {"type": "integer", "description": "点赞次数，默认 1，上限 10"},
         },
     },
