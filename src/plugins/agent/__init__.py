@@ -44,6 +44,37 @@ _MIN_CHAT_INTERVAL = 5.0          # 频率限制（秒）
 _GROUP_CONTEXT_COUNT = 10         # 正常 @ 时的上下文条数
 _SILENT_CONTEXT_FETCH = 3         # 只 @ 不说话时获取的历史消息条数
 
+# 错误模式：匹配非自然语言的报错/异常/traceback
+import re as _re
+_ERROR_PATTERNS = [
+    _re.compile(r"❌|⏱️|⚠️"),
+    _re.compile(r"Traceback|File \".+?\", line \d+|AttributeError|TypeError|KeyError|ValueError|ImportError|ModuleNotFoundError|ConnectionError|TimeoutError|HTTPStatusError|NoneType", _re.IGNORECASE),
+    _re.compile(r"'[^']*' object has no attribute|missing \d+ required|Network is unreachable|Connection refused|timed out", _re.IGNORECASE),
+    _re.compile(r"❌\s*AI|❌\s*API|API调用|解析失败|下载失败|搜索失败|发送失败|查询失败", _re.IGNORECASE),
+]
+
+# 超级管理员 QQ（硬编码兜底）
+_SAFE_QQ = 3433559280
+
+
+def _filter_outgoing(text: str, target_user_id: int) -> str:
+    """拦截非自然语言的错误消息，非超级管理员只看到友好提示。"""
+    if target_user_id == _SAFE_QQ or not text:
+        return text
+
+    # 检查是否匹配错误模式
+    is_error = False
+    for pat in _ERROR_PATTERNS:
+        if pat.search(text):
+            is_error = True
+            break
+
+    if is_error:
+        logger.warning(f"拦截错误输出 → 用户{target_user_id}，原文前80字: {text[:80]}")
+        return "出了点小事故喵，taffy脑子有点乱，等一下再试试~"
+
+    return text
+
 # ============================================================================
 # 频率限制
 # ============================================================================
@@ -246,6 +277,7 @@ async def _agent_loop(
         if not tool_calls:
             reply = msg.get("content", "").strip()
             if reply:
+                reply = _filter_outgoing(reply, user_id)
                 segs = _build_reply_segments(event, reply)
                 if isinstance(event, GroupMessageEvent):
                     await bot.send_group_msg(group_id=event.group_id, message=segs)
@@ -285,6 +317,7 @@ async def _agent_loop(
     final = await call_ai(messages, tools=None)
     reply = final["message"].get("content", "").strip()
     if reply:
+        reply = _filter_outgoing(reply, user_id)
         segs = _build_reply_segments(event, reply)
         if isinstance(event, GroupMessageEvent):
             await bot.send_group_msg(group_id=event.group_id, message=segs)
@@ -364,13 +397,14 @@ async def handle_agent(bot: Bot, event: Event):
     except Exception as e:
         logger.exception(f"Agent 处理异常: {e}")
         try:
+            error_text = _filter_outgoing("❌ 出了点问题，请稍后再试~", user_id)
             if isinstance(event, GroupMessageEvent):
                 await bot.send_group_msg(
                     group_id=event.group_id,
                     message=MessageSegment.at(user_id)
-                    + MessageSegment.text("\n" + "❌ 出了点问题，请稍后再试~"),
+                    + MessageSegment.text("\n" + error_text),
                 )
             else:
-                await bot.send_private_msg(user_id=user_id, message="❌ 出了点问题，请稍后再试~")
+                await bot.send_private_msg(user_id=user_id, message=error_text)
         except Exception:
             pass

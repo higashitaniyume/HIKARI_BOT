@@ -34,6 +34,31 @@ MAX_DOWNLOAD_SIZE = 100 * 1024 * 1024  # 100 MB
 MAX_QQ_UPLOAD_SIZE = 8 * 1024 * 1024    # 8 MB
 MAX_QQ_VIDEO_SIZE = 15 * 1024 * 1024    # 15 MB
 
+# ── 错误拦截 ─────────────────────────────────────────────
+
+_SAFE_QQ = 3433559280
+
+_error_patterns = [
+    "Traceback", "AttributeError", "TypeError", "KeyError", "ValueError",
+    "ImportError", "ModuleNotFoundError", "ConnectionError", "TimeoutError",
+    "HTTPStatusError", "NoneType", "object has no attribute",
+    "missing required", "Network is unreachable", "Connection refused",
+    "timed out", "❌", "⏱️",
+]
+
+
+def _filter_error(text: str, target_user_id: int) -> str:
+    """拦截非自然语言的错误消息，非超级管理员只看到友好提示。"""
+    if target_user_id == _SAFE_QQ or not text:
+        return text
+
+    tl = text.lower()
+    for pat in _error_patterns:
+        if pat.lower() in tl:
+            logger.warning(f"拦截错误输出 → QQ{target_user_id}，原文前60字: {text[:60]}")
+            return "出了点小事故喵，taffy脑子有点乱，等一下再试试~"
+    return text
+
 # ============================================================================
 # OpenAI 工具定义（function calling）
 # ============================================================================
@@ -334,6 +359,8 @@ async def _tool_send_message(
             if at_user is None or at_user == 0:
                 at_user = int(cq_at.group(1))
             text = re.sub(r"\[CQ:at,qq=\d+\]\s*", "", text).strip()
+    # 错误拦截：非超级管理员不看到报错信息
+    text = _filter_error(text, user_id)
     if isinstance(event, GroupMessageEvent):
         if at_user == 0:
             await bot.send_group_msg(
@@ -390,14 +417,16 @@ async def _tool_send_to(
     try:
         if is_group:
             group_id = int(target[len("group:"):])
-            msg = MessageSegment.text(text)
+            safe_text = _filter_error(text, at_user or 0)
+            msg = MessageSegment.text(safe_text)
             if at_user and at_user > 0:
-                msg = MessageSegment.at(at_user) + MessageSegment.text("\n" + text)
+                msg = MessageSegment.at(at_user) + MessageSegment.text("\n" + safe_text)
             await bot.send_group_msg(group_id=group_id, message=msg)
             return f"已发送到群 {group_id}"
         else:
             qq = int(target)
-            await bot.send_private_msg(user_id=qq, message=text)
+            safe_text = _filter_error(text, qq)
+            await bot.send_private_msg(user_id=qq, message=safe_text)
             return f"已发送到 QQ {qq}"
     except Exception as e:
         return f"❌ 发送失败: {e}"
