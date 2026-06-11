@@ -48,8 +48,8 @@ TOOLS: list[dict[str, Any]] = [
                 "向当前会话发送一条聊天回复。"
                 "当用户只是想聊天、提问、吐槽、闲聊时使用此函数。"
                 "这是最常用的函数。"
-                "在群聊中，默认会自动 @发送者；可以通过 at_user 参数 @其他群成员。"
-                "回复风格请遵循系统提示词中定义的角色设定。"
+                "在群聊中，默认会自动 @发送者。"
+                "重要：@某人必须用 at_user 参数(填QQ号)，禁止在 text 里写 [CQ:at,qq=xxx]。"
             ),
             "parameters": {
                 "type": "object",
@@ -236,8 +236,8 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "search_chat_history",
             "description": (
-                "搜索当前会话的聊天记录。"
-                "当用户问'我之前说了什么'、'之前谁提到过xxx'、'翻一下之前的聊天'时调用。"
+                "搜索当前会话的聊天记录（支持关键词+日期范围）。"
+                "当用户问'之前谁提到过xxx'、'翻一下聊天'、'6月8号到10号的消息'时调用。"
                 "群聊中只能搜索本群的记录，无法跨群或访问私聊。私聊中只能搜索当前私聊记录。"
             ),
             "parameters": {
@@ -250,6 +250,14 @@ TOOLS: list[dict[str, Any]] = [
                     "count": {
                         "type": "integer",
                         "description": "返回条数上限，默认 10",
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "起始日期，如 '2026-06-01' 或 '6月1日'",
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "结束日期，如 '2026-06-10' 或 '6月10日'",
                     },
                 },
                 "required": [],
@@ -342,7 +350,16 @@ async def _tool_send_message(
     user_id: int, group_id: Optional[int],
     at_user: int | None = None,
 ) -> str:
-    """发送聊天回复，可指定 @ 目标。"""
+    """发送聊天回复，可指定 @ 目标。
+    注意：@某人请用 at_user 参数传入QQ号，不要在 text 里写 [CQ:at,qq=xxx]！"""
+    # 安全阀：AI 如果把 [CQ:at,qq=xxx] 写进 text，自动提取并清理
+    import re
+    if isinstance(text, str):
+        cq_at = re.search(r"\[CQ:at,qq=(\d+)\]", text)
+        if cq_at:
+            if at_user is None or at_user == 0:
+                at_user = int(cq_at.group(1))
+            text = re.sub(r"\[CQ:at,qq=\d+\]\s*", "", text).strip()
     if isinstance(event, GroupMessageEvent):
         if at_user == 0:
             await bot.send_group_msg(
@@ -502,15 +519,34 @@ async def _tool_get_group_info(bot: Bot, group_id: int) -> str:
     return "\n".join(lines)
 
 
+def _parse_date(s: str) -> str | None:
+    """解析中文日期字符串为 YYYY-MM-DD 格式。"""
+    import re
+    s = s.strip()
+    # 2026-06-01
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        return s
+    # 6月1日 或 6月1
+    m = re.match(r"(\d{1,2})月(\d{1,2})[日号]?", s)
+    if m:
+        return f"2026-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    # 2026年6月1日
+    m = re.match(r"(\d{4})年(\d{1,2})月(\d{1,2})[日号]?", s)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return None
+
+
 async def _tool_search_chat_history(
     group_id: int | None, user_id: int,
     keyword: str = "", count: int = 10,
+    start_date: str = "", end_date: str = "",
 ) -> str:
-    """搜索当前会话的聊天记录（仅限当前群或当前私聊，不可跨上下文）。"""
+    """搜索当前会话的聊天记录（支持关键词+日期范围，不可跨上下文）。"""
+    import re as _re
     store = get_message_store()
-    count = max(1, min(count, 15))  # 限制 1~15 条
+    count = max(1, min(count, 15))
 
-    # 根据上下文获取消息源
     if group_id is not None:
         messages = await store.get_group_messages(group_id)
         scope = f"群 {group_id}"
@@ -521,7 +557,22 @@ async def _tool_search_chat_history(
     if not messages:
         return f"当前 {scope} 暂无聊天记录"
 
-    # 关键词搜索（不区分大小写）
+    # 日期范围过滤
+    if start_date or end_date:
+        start_d = _parse_date(start_date) if start_date else None
+        end_d = _parse_date(end_date) if end_date else None
+        if start_d is not None or end_d is not None:
+            filtered = []
+            for m in messages:
+                t = str(m.get("time", ""))[:10]  # YYYY-MM-DD
+                if start_d and t < start_d:
+                    continue
+                if end_d and t > end_d:
+                    continue
+                filtered.append(m)
+            messages = filtered
+
+    # 关键词搜索
     kw = keyword.strip().lower()
     if kw:
         matched = []
@@ -534,18 +585,21 @@ async def _tool_search_chat_history(
                 or sender_info.get("nickname")
                 or str(sender_info.get("user_id", "?"))
             ).lower()
-            # 搜索消息内容 + 发送者昵称
             if kw in msg_text or kw in raw_text or kw in sender_name:
                 matched.append(m)
         messages = matched
 
     if not messages:
-        return f"在 {scope} 的记录中未找到与「{keyword}」相关的消息"
+        desc = f"关键词「{keyword}」" if kw else ""
+        desc += f" 日期 {start_date}~{end_date}" if (start_date or end_date) else ""
+        return f"在 {scope} 的记录中未找到匹配的消息{('（' + desc.strip() + '）') if desc else ''}"
 
-    # 取最后 N 条
     recent = messages[-count:]
 
-    lines = [f"{scope} 的聊天记录" + (f"（搜索「{keyword}」，{len(messages)} 条匹配，显示最近 {len(recent)} 条）：" if kw else f"（最近 {len(recent)} 条）：")]
+    date_info = ""
+    if start_date or end_date:
+        date_info = f"，{start_date or '...'} ~ {end_date or '...'}"
+    lines = [f"{scope} 的聊天记录" + (f"（搜索「{keyword}」{date_info}，{len(messages)} 条匹配，显示最近 {len(recent)} 条）：" if kw else f"（最近 {len(recent)} 条）：")]
     for m in recent:
         sender = m.get("sender", {})
         uid = sender.get("user_id", "?")
@@ -976,6 +1030,8 @@ async def execute_tool(
             group_id, user_id,
             keyword=arguments.get("keyword", ""),
             count=arguments.get("count", 10),
+            start_date=arguments.get("start_date", ""),
+            end_date=arguments.get("end_date", ""),
         )
     elif tool_name == "search_web":
         return await _tool_search_web(arguments.get("query", ""))

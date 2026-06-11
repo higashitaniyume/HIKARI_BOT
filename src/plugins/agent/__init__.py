@@ -37,10 +37,19 @@ from .tools import TOOLS, execute_tool
 logger = logging.getLogger("hikari.plugins.agent")
 
 # ============================================================================
+# 常量
+# ============================================================================
+
+_MIN_CHAT_INTERVAL = 5.0          # 频率限制（秒）
+_GROUP_CONTEXT_COUNT = 10         # 正常 @ 时的上下文条数
+_SILENT_CONTEXT_FETCH = 3         # 只 @ 不说话时获取的历史消息条数
+_IDLE_MINUTES = 10                # 空闲多少分钟算对话结束
+_TOPIC_CHANGE_THRESHOLD = 0.3     # 语义相似度阈值（低于此值 = 话题切换）
+
+# ============================================================================
 # 频率限制
 # ============================================================================
 
-_MIN_CHAT_INTERVAL = 5.0
 _cooldowns: dict[str, float] = {}
 
 
@@ -70,16 +79,12 @@ def _set_cooldown(user_id: int, group_id: Optional[int]) -> None:
 # 群聊上下文 & 用户识别
 # ============================================================================
 
-# 群聊上下文消息条数
-_GROUP_CONTEXT_COUNT = 10
 
-
-async def _build_group_context(group_id: int, current_user_id: int, count: int = _GROUP_CONTEXT_COUNT) -> str:
-    """从 message_store 读取最近消息，构建上下文和用户映射。
-
-    Returns:
-        格式化的上下文文本（最近消息 + 群成员QQ→昵称映射）
-    """
+async def _build_group_context(
+    group_id: int, current_user_id: int,
+    count: int = _GROUP_CONTEXT_COUNT,
+) -> str:
+    """从 message_store 读取最近消息，构建上下文和用户映射。"""
     store = get_message_store()
     try:
         msgs = await store.get_group_messages(group_id)
@@ -89,10 +94,7 @@ async def _build_group_context(group_id: int, current_user_id: int, count: int =
     if not msgs:
         return ""
 
-    # 取最近 N 条
     recent = msgs[-count:]
-
-    # 构建 QQ→昵称 映射（去重保留最新昵称）
     name_map: dict[int, str] = {}
     lines: list[str] = []
     for m in recent:
@@ -103,12 +105,10 @@ async def _build_group_context(group_id: int, current_user_id: int, count: int =
         msg_text = str(m.get("message", ""))[:120]
         lines.append(f"  {nick}(QQ{uid}): {msg_text}")
 
-    # 构建注入文本
     parts: list[str] = []
     parts.append("[群聊最近消息]")
     parts.extend(lines)
 
-    # 群成员映射（最近发言的人）
     if name_map:
         parts.append("\n[群成员映射（昵称→QQ，可用于at_user参数）]")
         for uid, nick in sorted(name_map.items()):
@@ -119,7 +119,6 @@ async def _build_group_context(group_id: int, current_user_id: int, count: int =
 
 
 def _build_time_hint(user_id: int, group_id: Optional[int]) -> str:
-    """构建当前时间 + 用户上下文的提示文本。"""
     now = datetime.now()
     weekday = ["一", "二", "三", "四", "五", "六", "日"][now.weekday()]
     hint = (
@@ -134,8 +133,86 @@ def _build_time_hint(user_id: int, group_id: Optional[int]) -> str:
 
 
 # ============================================================================
+# 只 @ 不说话：用嵌入模型检测话题切换
+# ============================================================================
+
+
+async def _analyze_silent_at(bot: Bot, group_id: int) -> str:
+    """获取 @ 消息前的最近消息，判断话题是否切换。
+
+    使用 get_group_msg_history 获取最近 {_SILENT_CONTEXT_FETCH}+1 条消息，
+    用嵌入模型检测话题连续性，返回给 AI 的提示文本。
+    """
+    try:
+        msgs = await bot.get_group_msg_history(
+            group_id=group_id, count=_SILENT_CONTEXT_FETCH + 1,
+        )
+    except Exception as e:
+        logger.warning(f"获取群消息历史失败: {e}")
+        return "（你被@了，简单看看上文，回一句就行）"
+
+    # msgs[0] = @机器人的那条，msgs[1] = 前一条，msgs[2] = 再前一条
+    if len(msgs) < 2:
+        return "（你被@了，前面没有上下文，简单回应一下）"
+
+    prev_msgs = msgs[1:]  # 排除 @机器人 那条
+
+    # 提取消息文本
+    texts: list[str] = []
+    for m in prev_msgs:
+        if hasattr(m, "message"):
+            texts.append(str(m.message).strip())
+        else:
+            texts.append("")
+
+    texts = [t for t in texts if t]
+    if not texts:
+        return "（你被@了，前面没有有效上下文，简单回应一下）"
+
+    # 用嵌入模型检测最新两条的语义相似度
+    if len(texts) >= 2:
+        try:
+            from src.core.embedding import get_embedding
+            emb = get_embedding()
+            vecs = await emb.encode_batch(texts[:2])
+            sim = sum(a * b for a, b in zip(vecs[0], vecs[1]))
+        except Exception as e:
+            logger.warning(f"嵌入相似度计算失败: {e}")
+            sim = 0.5  # 兜底：当作连续话题
+
+        if sim < _TOPIC_CHANGE_THRESHOLD:
+            # 话题完全变了 → 只看最新一条
+            context = "\n".join(f"  {t[:100]}" for t in texts[:1])
+            return (
+                f"（你被@了。上文的最新一条消息话题与之前完全不同（相似度{sim:.1f}），"
+                f"请只关注这一条消息，简单回应：\n{context}\n）"
+            )
+
+    # 话题连续 → 看全部
+    context = "\n".join(f"  {t[:100]}" for t in texts)
+    return (
+        f"（你被@了但没有说话。以下是@{_SILENT_CONTEXT_FETCH}条上下文，"
+        f"请自然地接话，简短回应：\n{context}\n）"
+    )
+
+
+# ============================================================================
 # Agent 主循环
 # ============================================================================
+
+
+def _build_reply_segments(event: Event, reply_text: str) -> list:
+    """构建群聊回复消息段：引用 + @ + 文本。私聊只返回文本。"""
+    if isinstance(event, GroupMessageEvent):
+        msg_id = getattr(event, "message_id", None)
+        segments = []
+        if msg_id:
+            segments.append(MessageSegment.reply(msg_id))
+        segments.append(MessageSegment.at(event.user_id))
+        segments.append(MessageSegment.text("\n" + reply_text))
+        return segments
+    else:
+        return [MessageSegment.text(reply_text)]
 
 
 async def _agent_loop(
@@ -146,21 +223,13 @@ async def _agent_loop(
     group_id: Optional[int],
     context_count: int = _GROUP_CONTEXT_COUNT,
 ) -> None:
-    """Agent 主循环：构建上下文 → 调用 AI → 执行工具 → 最终回复。
-
-    群聊场景下自动注入：
-        - 当前时间 + 用户/群信息
-        - 最近 {_GROUP_CONTEXT_COUNT} 条消息作为上下文
-        - 群成员 昵称→QQ 映射（AI 可通过昵称 @人）
-    """
     mem = get_memory()
     history = await mem.get_memory(user_id, group_id)
 
     # ── 构建系统提示词 ──────────────────────────────
     system_prompt = get_system_prompt() + _build_time_hint(user_id, group_id)
 
-    # ── 长期记忆（memory.md）─────────────────────────
-    # 先注入群共享记忆，再注入个人记忆
+    # 长期记忆
     if group_id:
         group_mem = await mem.get_group_memory(group_id)
         if group_mem:
@@ -169,8 +238,7 @@ async def _agent_loop(
     if long_term:
         system_prompt += "\n\n" + long_term
 
-    # ── 群聊上下文 ──────────────────────────────────
-    group_context = ""
+    # 群聊上下文
     if group_id:
         group_context = await _build_group_context(group_id, user_id, count=context_count)
         if group_context:
@@ -189,18 +257,14 @@ async def _agent_loop(
         if not tool_calls:
             reply = msg.get("content", "").strip()
             if reply:
+                segs = _build_reply_segments(event, reply)
                 if isinstance(event, GroupMessageEvent):
-                    await bot.send_group_msg(
-                        group_id=event.group_id,
-                        message=MessageSegment.at(user_id)
-                        + MessageSegment.text("\n" + reply),
-                    )
+                    await bot.send_group_msg(group_id=event.group_id, message=segs)
                 else:
-                    await bot.send_private_msg(user_id=user_id, message=reply)
+                    await bot.send_private_msg(user_id=user_id, message=segs[0])
                 await mem.append(user_id, user_msg, reply, group_id)
             return
 
-        # AI 调用了工具 → 执行 → 结果加入对话
         messages.append({
             "role": "assistant",
             "content": msg.get("content") or "",
@@ -223,24 +287,20 @@ async def _agent_loop(
                 "content": result,
             })
 
-            # 如果已经发了消息，不再继续循环
             if func_name == "send_message":
                 await mem.append(user_id, user_msg, func_args.get("text", ""), group_id)
                 return
 
-    # ── 超过最大轮数，强制生成回复 ──────────────────
+    # 超过最大轮数
     logger.warning("Agent 达到最大 function calling 轮数，强制生成回复")
     final = await call_ai(messages, tools=None)
     reply = final["message"].get("content", "").strip()
     if reply:
+        segs = _build_reply_segments(event, reply)
         if isinstance(event, GroupMessageEvent):
-            await bot.send_group_msg(
-                group_id=event.group_id,
-                message=MessageSegment.at(user_id)
-                + MessageSegment.text("\n" + reply),
-            )
+            await bot.send_group_msg(group_id=event.group_id, message=segs)
         else:
-            await bot.send_private_msg(user_id=user_id, message=reply)
+            await bot.send_private_msg(user_id=user_id, message=segs[0])
         await mem.append(user_id, user_msg, reply, group_id)
 
 
@@ -257,7 +317,6 @@ WHITELIST = Rule(_whitelist_check)
 
 
 async def _need_me_rule(event: Event) -> bool:
-    """私聊始终通过，群聊必须 @机器人。"""
     if isinstance(event, PrivateMessageEvent):
         return True
     if isinstance(event, GroupMessageEvent):
@@ -272,37 +331,31 @@ agent_handler = on_message(rule=WHITELIST & NEED_ME, priority=3, block=True)
 
 @agent_handler.handle()
 async def handle_agent(bot: Bot, event: Event):
-    """Agent 统一入口。"""
     if not isinstance(event, (GroupMessageEvent, PrivateMessageEvent)):
         return
 
     user_id = event.user_id
     group_id = event.group_id if isinstance(event, GroupMessageEvent) else None
-
     pure_text = event.get_plaintext().strip()
 
-    # ── 回复检测：有人回复了机器人发的消息 ──────────────
-    reply_prefix = ""
+    # ── 回复检测 ──────────────────────────────────
     reply_msg = getattr(event, "reply", None)
     if reply_msg and getattr(reply_msg, "user_id", None) == event.self_id:
-        # 提取被回复的消息内容
         replied_text = str(reply_msg.message).strip() if hasattr(reply_msg, "message") else ""
         if replied_text:
-            reply_prefix = (
-                f"（用户回复了你之前发的消息「{replied_text[:200]}」"
-            )
+            prefix = f"（用户回复了你之前发的消息「{replied_text[:200]}」"
             if pure_text:
-                reply_prefix += f"，并说: {pure_text}）"
+                prefix += f"，并说: {pure_text}）"
             else:
-                reply_prefix += "）"
-            pure_text = reply_prefix
+                prefix += "）"
+            pure_text = prefix
 
-    silent_at = False  # 标记：是否只 @ 没说话
+    silent_at = False
 
-    # 群聊中只 @机器人 但没说话 → 只看最近 2 条上下文，简要回应
+    # ── 只 @ 不说话：嵌入模型检测话题切换 ──────────
     if not pure_text:
         if isinstance(event, GroupMessageEvent):
-            pure_text = "（你被@了，简单看看上文，回一句就行）"
+            pure_text = await _analyze_silent_at(bot, group_id)
             silent_at = True
         else:
             return
@@ -310,7 +363,6 @@ async def handle_agent(bot: Bot, event: Event):
     location = f"群{group_id}" if group_id else "私聊"
     logger.info(f"[Agent] {location} {user_id}: {pure_text[:100]}")
 
-    # 频率限制（静默）
     allowed, _ = _check_cooldown(user_id, group_id)
     if not allowed:
         return
@@ -322,15 +374,14 @@ async def handle_agent(bot: Bot, event: Event):
         await _agent_loop(bot, event, user_id, pure_text, group_id, context_count=ctx_count)
     except Exception as e:
         logger.exception(f"Agent 处理异常: {e}")
-        error_msg = "❌ 出了点问题，请稍后再试~"
         try:
             if isinstance(event, GroupMessageEvent):
                 await bot.send_group_msg(
                     group_id=event.group_id,
                     message=MessageSegment.at(user_id)
-                    + MessageSegment.text("\n" + error_msg),
+                    + MessageSegment.text("\n" + "❌ 出了点问题，请稍后再试~"),
                 )
             else:
-                await bot.send_private_msg(user_id=user_id, message=error_msg)
+                await bot.send_private_msg(user_id=user_id, message="❌ 出了点问题，请稍后再试~")
         except Exception:
             pass
