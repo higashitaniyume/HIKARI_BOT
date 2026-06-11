@@ -125,7 +125,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "manage_memory",
-            "description": "管理当前用户的 AI 对话记忆。操作：clear(清除记忆), view(查看记忆条数)。",
+            "description": "管理 AI 对当前用户的长期记忆（偏好/习惯/事实），不是聊天记录。操作：clear(清除记忆), view(查看记忆条数)。搜索聊天记录请用 search_chat_history。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -235,9 +235,10 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "search_chat_history",
             "description": (
-                "搜索当前会话的聊天记录（支持关键词+日期范围）。"
-                "当用户问'之前谁提到过xxx'、'翻一下聊天'、'6月8号到10号的消息'时调用。"
-                "群聊中只能搜索本群的记录，无法跨群或访问私聊。私聊中只能搜索当前私聊记录。"
+                "搜索聊天记录——查历史消息的唯一工具，不是查AI记忆。"
+                "当用户说'查记录'、'之前谁说过'、'翻聊天'、'搜消息'、'历史记录'时调用。"
+                "支持关键词+日期范围(如'6月1日到6月10日')。"
+                "群聊只能搜本群，私聊只能搜当前私聊，不可跨上下文。"
             ),
             "parameters": {
                 "type": "object",
