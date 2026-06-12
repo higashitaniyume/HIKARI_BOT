@@ -57,15 +57,21 @@ async def handle_list_skills(event: Event):
         name = sk["name"]
         display = sk.get("display_name", name)
         desc = sk.get("description", "")
+        # 如果 display_name 等于 name（kebab-case 格式名），不重复显示
+        if display == name:
+            show_name = name
+        else:
+            show_name = f"{display}（{name}）"
         badges: list[str] = []
         if name == default_name:
             badges.append("默认")
         if name == current:
             badges.append("当前使用")
         badge_str = f" [{', '.join(badges)}]" if badges else ""
-        lines.append(f"  • {display}（{name}）{badge_str}")
+        lines.append(f"  • {show_name}{badge_str}")
         if desc:
-            lines.append(f"    {desc[:60]}{'…' if len(desc) > 60 else ''}")
+            desc_short = desc.replace("\n", " ")[:80]
+            lines.append(f"    {desc_short}{'…' if len(desc) > 80 else ''}")
 
     lines.append("")
     lines.append("发送 /skill <名称> 切换技能，发送 /skill off 恢复默认。")

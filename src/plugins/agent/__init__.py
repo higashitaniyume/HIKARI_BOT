@@ -26,7 +26,7 @@ from nonebot.adapters.onebot.v11 import (
 )
 from nonebot.rule import Rule
 
-from src.core.config import get_skill_prompt, get_system_prompt, get_user_skill
+from src.core.config import get_skill_prompt, get_user_skill
 from src.core.message_store import get_message_store
 from src.plugins.admin import get_whitelist
 

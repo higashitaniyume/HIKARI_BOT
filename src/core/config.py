@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 from typing import Optional
@@ -111,7 +112,7 @@ def get_system_prompt() -> str:
 # 技能（Skill）系统 —— 可切换的人物提示词
 # ============================================================================
 
-SKILLS_DIR: str = _get("skills.dir", "data/skills")
+SKILLS_DIR: str = _get("skills.dir", "skills")
 
 # 技能定义缓存
 _skill_cache: dict[str, dict] = {}
@@ -134,8 +135,93 @@ def _get_user_state_path() -> Path:
     return _USER_STATE_PATH
 
 
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+
+
+def _parse_md_skill(md_path: Path) -> dict | None:
+    """解析 Markdown 技能文件（Claude Code SKILL.md 格式）。
+
+    提取 YAML frontmatter 作为元数据，正文作为提示词内容。
+    不依赖 PyYAML，用手写解析器处理简单键值对。
+    """
+    try:
+        text = md_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning(f"无法读取 Markdown 技能文件 {md_path}: {e}")
+        return None
+
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        # 没有 frontmatter，整个文件作为提示词
+        body = text.strip()
+        if not body:
+            return None
+        return {
+            "name": md_path.stem,
+            "display_name": md_path.stem,
+            "description": "",
+            "prompt_file": "",
+            "_prompt_content": body,
+        }
+
+    frontmatter = m.group(1)
+    body = text[m.end():].strip()
+    if not body:
+        return None
+
+    # 简单解析 YAML-like 键值对
+    meta: dict[str, str] = {}
+    current_key: str | None = None
+    current_value: list[str] = []
+
+    for line in frontmatter.split("\n"):
+        if not line.strip() or line.strip().startswith("#"):
+            continue
+        kv_match = re.match(r"^(\w[\w-]*)\s*:\s*(.*)", line)
+        if kv_match:
+            if current_key:
+                meta[current_key] = "\n".join(current_value).strip()
+            current_key = kv_match.group(1)
+            val = kv_match.group(2).strip()
+            # 处理 YAML block scalar indicators (|, >, |-, >-, etc.)
+            if val in ("|", "|+", "|-", ">", ">+", ">-"):
+                current_value = []
+            else:
+                current_value = [val] if val else []
+        else:
+            if current_key:
+                stripped = line.strip()
+                current_value.append(stripped)
+
+    if current_key:
+        meta[current_key] = "\n".join(current_value).strip()
+
+    name = meta.get("name", md_path.stem)
+    display_name = meta.get("display_name", name)
+    description = meta.get("description", "")
+    is_default = meta.get("default", "").strip().lower() in ("true", "yes", "1")
+
+    return {
+        "name": name,
+        "display_name": display_name,
+        "description": description,
+        "prompt_file": "",
+        "_prompt_content": body,
+        "default": is_default,
+    }
+
+
 def _load_skill_definitions() -> dict[str, dict]:
-    """加载所有技能定义文件（带缓存）。"""
+    """加载所有技能定义文件（带缓存）。
+
+    扫描格式（Claude Code SKILL.md）：
+        1. <skill_dir>/<name>/SKILL.md  —— 子目录中的 SKILL.md（推荐）
+        2. <skill_dir>/<name>.md         —— 平铺的 .md 文件
+
+    自动发现目录：
+        - skills/ （主目录，由 skills.dir 配置）
+        - .claude/skills/ （nuwa-skill 输出目录）
+    """
     global _skill_cache, _skill_cache_ts
     now = time.monotonic()
     if _skill_cache and now - _skill_cache_ts < _skill_cache_ttl:
@@ -147,34 +233,57 @@ def _load_skill_definitions() -> dict[str, dict]:
     skill_path = Path(skill_dir)
 
     skills: dict[str, dict] = {}
-    if not skill_path.exists():
-        logger.debug(f"技能目录不存在: {skill_path}")
-        _skill_cache = skills
-        _skill_cache_ts = now
-        return skills
+    if skill_path.exists():
+        # ── 格式 1: <dir>/SKILL.md（推荐）────────────────
+        for d in sorted(skill_path.iterdir()):
+            if not d.is_dir():
+                continue
+            skill_md = d / "SKILL.md"
+            if not skill_md.exists():
+                continue
+            data = _parse_md_skill(skill_md)
+            if data:
+                data["name"] = d.name
+                skills[d.name] = data
 
-    for f in sorted(skill_path.glob("*.json")):
-        if f.name == "user_state.json":
-            continue
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-            name = data.get("name", f.stem)
-            # 规范化：确保 name 与文件名一致
-            data.setdefault("name", name)
-            data.setdefault("display_name", name)
-            data.setdefault("description", "")
-            data.setdefault("prompt_file", "")
-            data.setdefault("model", None)
-            data.setdefault("temperature", None)
-            data.setdefault("default", False)
-            skills[name] = data
-        except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(f"技能定义 JSON 损坏: {f} — {e}")
+        # ── 格式 2: *.md（平铺）──────────────────────────
+        for f in sorted(skill_path.glob("*.md")):
+            data = _parse_md_skill(f)
+            if data and data["name"] not in skills:
+                skills[data["name"]] = data
+
+    # ── 自动发现: .claude/skills/（nuwa-skill 输出）─────
+    for extra_dir in (".claude/skills",):
+        _scan_extra_skills_dir(_ROOT / extra_dir, skills)
 
     _skill_cache = skills
     _skill_cache_ts = now
     logger.debug(f"已加载 {len(skills)} 个技能定义")
     return skills
+
+
+def _scan_extra_skills_dir(root: Path, skills: dict[str, dict]) -> None:
+    """扫描额外目录中的 skill 文件，不覆盖已有同名 skill。"""
+    if not root.exists() or not root.is_dir():
+        return
+
+    # 平铺 .md 文件
+    for f in sorted(root.glob("*.md")):
+        data = _parse_md_skill(f)
+        if data and data["name"] not in skills:
+            skills[data["name"]] = data
+
+    # 子目录中的 SKILL.md
+    for d in sorted(root.iterdir()):
+        if not d.is_dir():
+            continue
+        skill_md = d / "SKILL.md"
+        if not skill_md.exists():
+            continue
+        data = _parse_md_skill(skill_md)
+        if data and d.name not in skills:
+            data["name"] = d.name
+            skills[d.name] = data
 
 
 def list_skills() -> list[dict]:
@@ -199,13 +308,18 @@ def get_skill_prompt(skill_name: str | None) -> str:
     """获取指定技能的系统提示词。
 
     Args:
-        skill_name: 技能名称，None 或不存在时使用默认提示词
+        skill_name: 技能名称，None 时使用默认技能，无默认则回退到 prompts/hikari.txt
 
     Returns:
         系统提示词文本
     """
+    # 未指定 → 使用默认技能
     if not skill_name:
-        return get_system_prompt()
+        default = get_default_skill()
+        if default:
+            skill_name = default
+        else:
+            return get_system_prompt()
 
     skills = _load_skill_definitions()
     skill = skills.get(skill_name)
@@ -213,23 +327,12 @@ def get_skill_prompt(skill_name: str | None) -> str:
         logger.warning(f"技能 '{skill_name}' 不存在，使用默认提示词")
         return get_system_prompt()
 
-    prompt_file = skill.get("prompt_file", "")
-    if not prompt_file:
-        logger.warning(f"技能 '{skill_name}' 未配置 prompt_file，使用默认提示词")
-        return get_system_prompt()
+    # SKILL.md 正文即提示词
+    inline = skill.get("_prompt_content", "")
+    if inline:
+        return inline
 
-    # 解析相对路径
-    prompt_path = Path(prompt_file)
-    if not prompt_path.is_absolute():
-        prompt_path = _ROOT / prompt_path
-
-    try:
-        if prompt_path.exists():
-            return prompt_path.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeDecodeError) as e:
-        logger.warning(f"无法读取技能提示词文件 {prompt_path}: {e}")
-
-    logger.warning(f"技能 '{skill_name}' 的提示词文件不存在: {prompt_path}，使用默认提示词")
+    logger.warning(f"技能 '{skill_name}' 无提示词内容，使用默认提示词")
     return get_system_prompt()
 
 
