@@ -14,6 +14,9 @@
     "prompt": {
         "file": "prompts/hikari.txt"
     },
+    "skills": {
+        "dir": "skills"
+    },
     "ai_memory": {
         "max_messages": 40,
         "dir": "data/ai_memory"
