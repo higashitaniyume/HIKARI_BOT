@@ -1,10 +1,10 @@
 # HIKARI_BOT
 
-基于 NoneBot2 + OneBot v11 的智能 QQ Bot，集成 DeepSeek AI 对话、媒体解析、群聊记忆、可切换人物技能等功能。
+基于 NoneBot2 + OneBot v11 的智能永雏塔菲 QQ Bot，集成 DeepSeek AI 对话、媒体解析、群聊记忆、可切换人物技能等功能。
 
 > ⚠️ **免责声明**
 >
-> 本项目仅用于学习、研究 NoneBot2 / OneBot / AI Agent 的技术原理，**不建议自行部署**。
+> 本项目仅用于学习、研究 HIKARI_BOT 的技术原理，**不建议自行部署**。
 > 代码中包含大量硬编码配置（如超级管理员 QQ、服务器地址等），直接部署可能导致：
 >
 > - 与现有 OneBot 服务冲突
