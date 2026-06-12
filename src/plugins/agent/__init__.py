@@ -26,7 +26,7 @@ from nonebot.adapters.onebot.v11 import (
 )
 from nonebot.rule import Rule
 
-from src.core.config import get_system_prompt
+from src.core.config import get_skill_prompt, get_system_prompt, get_user_skill
 from src.core.message_store import get_message_store
 from src.plugins.admin import get_whitelist
 
@@ -247,7 +247,8 @@ async def _agent_loop(
     history = await mem.get_memory(user_id, group_id)
 
     # ── 构建系统提示词 ──────────────────────────────
-    system_prompt = get_system_prompt() + _build_time_hint(user_id, group_id)
+    skill_name = get_user_skill(user_id)
+    system_prompt = get_skill_prompt(skill_name) + _build_time_hint(user_id, group_id)
 
     # 长期记忆
     if group_id:

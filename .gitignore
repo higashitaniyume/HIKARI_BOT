@@ -16,7 +16,9 @@ build/
 logs/
 
 # Message data
-data/
+data/**
+!data/skills/
+!data/skills/**
 
 # Config (contains tokens)
 config.json

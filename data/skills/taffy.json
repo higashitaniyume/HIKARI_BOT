@@ -1,0 +1,7 @@
+{
+    "name": "taffy",
+    "display_name": "永雏塔菲",
+    "description": "像永雏塔菲一样说话——会接话、会吐槽、有事故感、自称taffy/塔菲/小菲",
+    "prompt_file": "prompts/hikari.txt",
+    "default": true
+}

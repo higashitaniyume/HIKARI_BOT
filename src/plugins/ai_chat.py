@@ -54,7 +54,9 @@ from src.core.config import (
     DEEPSEEK_BASE_URL,
     DEEPSEEK_MODEL,
     MAX_MEMORY_MESSAGES,
+    get_skill_prompt,
     get_system_prompt,
+    get_user_skill,
 )
 from src.plugins.admin import WHITELIST
 from src.plugins.video_parser import has_media_url
@@ -465,7 +467,8 @@ async def _do_chat(
 
     # 构建上下文
     history = await mem.get_memory(user_id, group_id)
-    messages: list[dict] = [{"role": "system", "content": get_system_prompt()}]
+    skill_name = get_user_skill(user_id)
+    messages: list[dict] = [{"role": "system", "content": get_skill_prompt(skill_name)}]
     messages.extend(history)
     messages.append({"role": "user", "content": message})
 
